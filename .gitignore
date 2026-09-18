@@ -9,3 +9,13 @@ Thumbs.db
 
 # Editor / local
 .idea/
+__pycache__/
+*.py[cod]
+
+# Companion agent private data (never commit chat exports or distilled identity data)
+companion/private_data/
+companion/exports/
+companion/*.log
+.env
+*.sqlite
+*.sqlite3
