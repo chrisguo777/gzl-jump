@@ -160,6 +160,7 @@ const ch = {
   sqX: 1, sqY: 1,
   dying: false, dieFall: 0, dieVX: 0, dieVY: 0, dieZ: 0,
   willLand: null, jumpDist: 0, targetDist: 0, jumpFrames: 45,
+  landImpact: 0,
 };
 
 let parts = [];
@@ -211,7 +212,7 @@ function reset() {
   for (let i = 0; i < 7; i++) addPlat();
   ch.col = 0; ch.row = 0;
   ch.jumpZ = 0; ch.jumping = false; ch.jumpT = 0;
-  ch.sqX = 1; ch.sqY = 1;
+  ch.sqX = 1; ch.sqY = 1; ch.landImpact = 0;
   ch.dying = false; ch.dieFall = 0; ch.dieZ = 0; ch.dieVX = 0; ch.dieVY = 0;
   ch.willLand = null;
   camCol = ch.col; camRow = ch.row;
@@ -305,6 +306,7 @@ function landed() {
   ch.col = ch.toCol; ch.row = ch.toRow;
   ch.jumping = false; ch.jumpZ = 0; ch.jumpT = 0;
   ch.sqX = 1; ch.sqY = 1;
+  ch.landImpact = 1;
   lastDir = chosenDir;
   if (ch.willLand === 'center') {
     playSound('perfect');
@@ -361,6 +363,9 @@ function update() {
     ch.sqY = 1 - chargeT * 0.28;
     ch.sqX = 1 + chargeT * 0.2;
     if (chargeT >= 0.95) { charging = false; startJump(); }
+  }
+  if (state !== 'jumping' && ch.landImpact > 0) {
+    ch.landImpact = Math.max(0, ch.landImpact - 1 / 10);
   }
   if (state === 'jumping' && ch.jumping) {
     const frames = ch.jumpFrames || 45;
@@ -1308,12 +1313,20 @@ function drawScene(city) {
         py += ch.dieZ;
       }
 
-      // 绘制阴影
+      // 阴影随跳跃高度缩小、变淡，强化腾空感
+      const shadowLift = Math.max(0, Math.min(1, ch.jumpZ / Math.max(TILE_Z * 3, 1)));
+      const shadowScale = 1 - shadowLift * 0.38;
       ctx.save();
-      ctx.globalAlpha = ch.dying ? 0 : 0.25;
+      ctx.globalAlpha = ch.dying ? 0 : 0.27 * (1 - shadowLift * 0.62);
       ctx.fillStyle = '#000';
       ctx.beginPath();
-      ctx.ellipse(s.x, s.y - TILE_H / 2, TILE_W * 0.3, TILE_H * 0.2, 0, 0, Math.PI * 2);
+      ctx.ellipse(
+        s.x,
+        s.y - TILE_H / 2,
+        TILE_W * 0.3 * shadowScale,
+        TILE_H * 0.2 * shadowScale,
+        0, 0, Math.PI * 2
+      );
       ctx.fill();
       ctx.restore();
 
@@ -1333,52 +1346,61 @@ function drawScene(city) {
 function drawCharacter3D(sx, sy, sz, scaleX, scaleY) {
   if (!charImg.complete) return;
 
+  const imgW = charImg.width || 45 * SCALE;
+  const imgH = charImg.height || 45 * SCALE;
+  let finalScaleX = scaleX, finalScaleY = scaleY;
+  let flipAngle = 0;
+
+  if (state === 'jumping') {
+    const t = Math.max(0, Math.min(1, ch.jumpT));
+    // smoothstep 让起跳和落地阶段更稳，中段翻转更利落
+    const flipProgress = t * t * (3 - 2 * t);
+    const screenTravelX = isoX(ch.toCol - ch.fromCol, ch.toRow - ch.fromRow);
+    const flipDirection = screenTravelX >= 0 ? 1 : -1;
+    flipAngle = flipDirection * Math.PI * 2 * flipProgress;
+
+    // 空中收身，落地前重新伸展
+    const tuck = Math.sin(Math.PI * t);
+    finalScaleX *= 1 + tuck * 0.10;
+    finalScaleY *= 1 - tuck * 0.12;
+  } else if (ch.landImpact > 0) {
+    // 落地短暂压缩，随后快速恢复
+    finalScaleX *= 1 + ch.landImpact * 0.16;
+    finalScaleY *= 1 - ch.landImpact * 0.16;
+  }
+
   ctx.save();
   ctx.translate(sx, sy);
 
-  // 应用isometric透视变换，给予3D感
+  // 应用 isometric 透视变换，保持角色与场景方向一致
   const isoPerspective = 0.85;
   ctx.transform(1, 0.25 * isoPerspective, 0.25 * isoPerspective, 0.95, 0, 0);
 
-  // 根据状态应用缩放
-  let finalScaleX = scaleX, finalScaleY = scaleY;
-
-  if (state === 'jumping') {
-    // 跳跃时轻微缩放变化
-    const jumpScale = 0.95 + ch.jumpT * 0.1;
-    finalScaleX *= jumpScale;
-    finalScaleY *= jumpScale;
-  }
-
+  // 将旋转中心移到身体中央，完成一整周前空翻
+  ctx.translate(0, -imgH * 0.5);
+  if (state === 'jumping') ctx.rotate(flipAngle);
   ctx.scale(finalScaleX, finalScaleY);
 
-  // 获取图片尺寸
-  const imgW = charImg.width || 45 * SCALE;
-  const imgH = charImg.height || 45 * SCALE;
+  // 图片围绕身体中心绘制，避免以前脚底为轴产生“甩圈”感
+  ctx.drawImage(charImg, -imgW / 2, -imgH / 2, imgW, imgH);
 
-  // 绘制原有图片人物，居中并从底部对齐
-  ctx.drawImage(charImg, -imgW / 2, -imgH, imgW, imgH);
-
-  // 根据状态添加特殊效果
   if (state === 'charge') {
-    // 蓄力时添加光晕效果
     ctx.globalAlpha = Math.min(chargeT * 0.3, 0.15);
     ctx.fillStyle = '#ffff99';
     ctx.beginPath();
-    ctx.arc(0, -imgH * 0.5, imgW * 0.6, 0, Math.PI * 2);
+    ctx.arc(0, 0, imgW * 0.6, 0, Math.PI * 2);
     ctx.fill();
   } else if (ch.dying) {
-    // 死亡时添加X效果
     ctx.globalAlpha = 0.6;
     ctx.strokeStyle = '#ff4444';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(-imgW * 0.3, -imgH * 0.5);
-    ctx.lineTo(imgW * 0.3, -imgH * 0.2);
+    ctx.moveTo(-imgW * 0.3, -imgH * 0.2);
+    ctx.lineTo(imgW * 0.3, imgH * 0.2);
     ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(imgW * 0.3, -imgH * 0.5);
-    ctx.lineTo(-imgW * 0.3, -imgH * 0.2);
+    ctx.moveTo(imgW * 0.3, -imgH * 0.2);
+    ctx.lineTo(-imgW * 0.3, imgH * 0.2);
     ctx.stroke();
   }
 
