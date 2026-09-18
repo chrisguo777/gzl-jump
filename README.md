@@ -30,6 +30,10 @@ gzl-jump/
 ├── images/gzl.png        # 角色贴图（网页版通过 <img src> 引用）
 ├── gzl.png               # 角色贴图副本（根目录，1.7MB，历史遗留）
 ├── verify_landmarks.js   # Playwright 截图辅助脚本（非自动断言测试）
+├── companion/            # 本地聊天蒸馏与 Ollama 对话服务（不含真实数据）
+│   ├── distill.py        # CSV/JSONL/TXT → persona + memories
+│   ├── server.py         # 仅监听 127.0.0.1 的本地 API
+│   └── start_companion.ps1
 │
 ├── app.js                # 【小程序】全局入口（几乎为空）
 ├── app.json              # 小程序全局配置，pages 只注册 pages/game/game
@@ -83,6 +87,13 @@ gzl-jump/
 - 已使用 Web Audio API 实现 `jump`、`land`、`perfect`、`miss` 四类合成音效。
 - 城市按分数推进，`Math.floor(score / 100) % CITIES.length` 决定当前城市。
 
+### 3.6 本地陪伴角色原型
+- 页面右上角提供独立聊天面板，不会把对话输入传给游戏画布。
+- 默认请求 `http://127.0.0.1:8765/api/chat`，由 [`companion/server.py`](companion/server.py) 调用本机 Ollama。
+- [`companion/distill.py`](companion/distill.py) 可将双方授权的 CSV、JSONL 或常见 TXT 导出记录，整理为 `persona.json` 与 `memories.jsonl`。
+- 真实导出和蒸馏结果放在 `companion/exports/`、`companion/private_data/`，两者已被 `.gitignore` 排除，禁止提交到公开仓库。
+- 详细运行步骤和当前 HTTPS 限制见 [`companion/README.md`](companion/README.md)。
+
 ---
 
 ## 4. 小程序版架构（`pages/game/game.js`）
@@ -125,7 +136,7 @@ gzl-jump/
 若角色图因浏览器本地文件（`file://`）安全策略不显示，用本地静态服务器：
 ```bash
 # 任选其一，在项目根目录执行
-python -m http.server 8888
+python companion/preview.py
 # 或
 npx serve -l 8888
 # 然后访问 http://localhost:8888/index.html
