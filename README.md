@@ -136,7 +136,7 @@ gzl-jump/
 若角色图因浏览器本地文件（`file://`）安全策略不显示，用本地静态服务器：
 ```bash
 # 任选其一，在项目根目录执行
-python -m http.server 8888
+python companion/preview.py
 # 或
 npx serve -l 8888
 # 然后访问 http://localhost:8888/index.html

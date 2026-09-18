@@ -2,6 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8765; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>跳一跳 3D · 城市之旅</title>
 <style>
@@ -37,6 +38,10 @@
     backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px);
     box-shadow:0 22px 70px rgba(0,0,0,.46); user-select:text; -webkit-user-select:text;
   }
+  #companion-panel { touch-action:pan-y; }
+  #companion-messages { overscroll-behavior:contain; touch-action:pan-y; }
+  #companion-input:focus-visible, #companion-panel button:focus-visible { outline:2px solid #ffb3df; outline-offset:2px; }
+  #companion-retry { margin:0 12px 10px; padding:8px; border-radius:10px; }
   #companion-panel.open { display:flex; }
   .companion-head { display:flex; align-items:center; gap:11px; padding:15px 16px 12px; border-bottom:1px solid rgba(255,255,255,.12); }
   .companion-avatar { width:35px; height:35px; border-radius:50%; object-fit:cover; border:1px solid rgba(255,255,255,.45); }
@@ -56,7 +61,7 @@
   #companion-send:disabled { opacity:.46; cursor:wait; }
   @media (max-width:600px) {
     #companion-toggle { top:12px; right:12px; height:38px; }
-    #companion-panel { top:58px; right:10px; width:calc(100vw - 20px); height:min(500px,calc(100vh - 70px)); }
+    #companion-panel { top:58px; right:10px; width:calc(100vw - 20px); height:min(440px,60dvh); }
   }
 </style>
 </head>
@@ -65,21 +70,22 @@
 <canvas id="character-3d" aria-hidden="true"></canvas>
 <div id="char-el"><img id="char-img" src="images/gzl.png" alt=""></div>
 <button id="companion-toggle" type="button" aria-controls="companion-panel" aria-expanded="false">♡ 对话</button>
-<section id="companion-panel" aria-label="游戏陪伴角色对话">
+<section id="companion-panel" role="dialog" aria-label="游戏陪伴角色对话">
   <div class="companion-head">
     <img class="companion-avatar" src="images/gzl.png" alt="">
     <div class="companion-title"><strong id="companion-name">旅伴</strong><span>AI 游戏角色 · 不是真人本人</span></div>
     <button id="companion-close" type="button" aria-label="关闭">×</button>
   </div>
-  <div id="companion-messages" aria-live="polite">
+  <div id="companion-messages" role="log" aria-live="polite">
     <div class="companion-message ai">我会陪你一起旅行。等本地记忆准备好后，我们就能聊起属于你们的故事。</div>
   </div>
   <form id="companion-form" class="companion-input-row">
-    <input id="companion-input" autocomplete="off" maxlength="500" placeholder="说点什么…">
+    <input id="companion-input" aria-label="给 AI 游戏角色的消息" autocomplete="off" maxlength="500" placeholder="说点什么…">
     <button id="companion-send" type="submit">发送</button>
   </form>
+  <button id="companion-retry" type="button" hidden>重试上一条</button>
 </section>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="vendor/three.min.js"></script>
 <script>
 "use strict";
 
@@ -124,14 +130,19 @@ const companionSend = document.getElementById('companion-send');
 const companionMessages = document.getElementById('companion-messages');
 const companionName = document.getElementById('companion-name');
 
-const COMPANION_ENDPOINT = localStorage.getItem('gzl_companion_endpoint') || 'http://127.0.0.1:8765/api/chat';
+// Privacy boundary: only this loopback API is permitted by code and CSP.
+const COMPANION_ENDPOINT = 'http://127.0.0.1:8765/api/chat';
+const companionRetry = document.getElementById('companion-retry');
+let companionFailed = '';
 const companionHistory = [];
 let companionBusy = false;
 
 function setCompanionOpen(open) {
   companionPanel.classList.toggle('open', open);
   companionToggle.setAttribute('aria-expanded', String(open));
-  if (open) setTimeout(() => companionInput.focus(), 50);
+  if (open && state === 'charge') { charging = false; chargeT = 0; state = 'ready'; }
+  if (open) companionInput.focus();
+  else companionToggle.focus();
 }
 
 function appendCompanionMessage(text, kind) {
@@ -139,46 +150,69 @@ function appendCompanionMessage(text, kind) {
   bubble.className = 'companion-message ' + kind;
   bubble.textContent = text;
   companionMessages.appendChild(bubble);
+  while (companionMessages.children.length > 40) companionMessages.firstElementChild.remove();
   companionMessages.scrollTop = companionMessages.scrollHeight;
   return bubble;
 }
 
-async function sendCompanionMessage(message) {
+async function sendCompanionMessage(message, retry = false) {
   if (companionBusy || !message.trim()) return;
   companionBusy = true;
   companionSend.disabled = true;
-  appendCompanionMessage(message, 'user');
-  companionHistory.push({ role:'user', content:message });
+  companionRetry.hidden = true;
+  companionForm.setAttribute('aria-busy', 'true');
+  if (!retry) appendCompanionMessage(message, 'user');
   const pending = appendCompanionMessage('正在想…', 'system');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 185000);
   try {
-    if (location.protocol === 'https:' && COMPANION_ENDPOINT.startsWith('http://')) {
-      throw new Error('GitHub Pages 不能直接连接本机 HTTP 服务，请先按 companion/README.md 使用本地预览。');
+    if (!['127.0.0.1', 'localhost'].includes(location.hostname) || location.protocol !== 'http:') {
+      throw new Error('请用本机安全预览启动游戏后再对话。');
     }
     const response = await fetch(COMPANION_ENDPOINT, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body:JSON.stringify({ message, history:companionHistory.slice(-8), game:{ city:CITIES[cityIndex].name, score } }),
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({ message, history:companionHistory.slice(-8) }),
+      signal:controller.signal, credentials:'omit', redirect:'error', cache:'no-store',
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.message || data.error || '本地陪伴服务没有响应');
+    if (!response.ok) throw new Error('本地服务暂不可用，请检查 Ollama 后重试。');
+    const data = await response.json();
+    if (typeof data.reply !== 'string') throw new Error('回复格式错误，请重试。');
     pending.remove();
-    const reply = String(data.reply || '我刚刚走神了，再说一次好吗？');
-    if (data.display_name) companionName.textContent = data.display_name;
+    if (typeof data.display_name === 'string') companionName.textContent = data.display_name.slice(0,40);
+    const reply = data.reply.slice(0,1200);
     appendCompanionMessage(reply, 'ai');
-    companionHistory.push({ role:'assistant', content:reply });
+    companionHistory.push({role:'user',content:message}, {role:'assistant',content:reply});
+    companionHistory.splice(0, Math.max(0, companionHistory.length-8));
+    companionFailed = '';
   } catch (error) {
-    pending.textContent = error.message || '无法连接本地陪伴服务。请确认 companion/start_companion.ps1 正在运行。';
+    pending.textContent = error instanceof TypeError ? '本地服务未启动，请运行启动脚本后重试。' :
+      error.name === 'AbortError' ? '等待超时，请稍后重试。' : error.message;
+    companionFailed = message;
+    companionRetry.hidden = false;
   } finally {
+    clearTimeout(timeout);
     companionBusy = false;
     companionSend.disabled = false;
-    companionInput.focus();
+    companionForm.setAttribute('aria-busy', 'false');
   }
 }
 
 companionToggle.addEventListener('click', () => setCompanionOpen(!companionPanel.classList.contains('open')));
 companionClose.addEventListener('click', () => setCompanionOpen(false));
+companionRetry.addEventListener('click', () => sendCompanionMessage(companionFailed, true));
+companionPanel.addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); setCompanionOpen(false); }
+  event.stopPropagation();
+});
+companionInput.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && event.isComposing) event.preventDefault();
+});
+for (const eventName of ['mousedown','mouseup','touchstart','touchend','pointerdown','pointerup']) {
+  companionPanel.addEventListener(eventName, event => event.stopPropagation());
+}
 companionForm.addEventListener('submit', event => {
   event.preventDefault();
+  if (companionBusy) return;
   const message = companionInput.value.trim();
   if (!message) return;
   companionInput.value = '';
@@ -386,6 +420,7 @@ function onRelease() {
 }
 
 canvas.addEventListener('mousedown', () => {
+  if (companionPanel.classList.contains('open')) return;
   if (state === 'start') { state = 'ready'; }
   else if (state === 'ready') {
     chosenDir = nextDirOf() || 'front';
@@ -401,6 +436,7 @@ canvas.addEventListener('mouseup', () => {
 
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
+  if (companionPanel.classList.contains('open')) return;
   if (state === 'start') { state = 'ready'; }
   else if (state === 'ready') {
     chosenDir = nextDirOf() || 'front';
