@@ -1,0 +1,10 @@
+<view class="container">
+  <canvas
+    type="2d"
+    id="c"
+    class="canvas"
+    bindtouchstart="onTouchStart"
+    bindtouchend="onTouchEnd"
+    bindtouchcancel="onTouchEnd"
+  />
+</view>

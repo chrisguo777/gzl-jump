@@ -1,0 +1,42 @@
+{
+  "description": "GZL 闯关小游戏",
+  "packOptions": { "ignore": [], "include": [] },
+  "miniprogramRoot": "./",
+  "compileType": "miniprogram",
+  "libVersion": "3.4.3",
+  "appid": "wx0000000000000000",
+  "projectname": "gzl_jump",
+  "condition": {},
+  "setting": {
+    "bundle": false,
+    "userConfirmedBundleSwitch": false,
+    "urlCheck": false,
+    "scopeDataCheck": false,
+    "coverView": true,
+    "es6": true,
+    "postcss": true,
+    "compileHotReLoad": true,
+    "lazyloadPlaceholderEnable": false,
+    "useMultiFrameRuntime": true,
+    "useApiHook": true,
+    "useApiHostProcess": true,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    },
+    "enableEngineNative": false,
+    "useIsolateContext": false,
+    "nodeModules": false,
+    "enhance": true,
+    "useVirtualHost": false,
+    "useStaticServer": true,
+    "showShadowRootInWxml": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": false,
+    "minifyJS": false,
+    "uglifyFileName": false
+  }
+}

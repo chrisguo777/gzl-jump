@@ -1,0 +1,1521 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>跳一跳 3D · 城市之旅</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#000;
+    font-family:"PingFang SC","Microsoft YaHei",sans-serif; -webkit-tap-highlight-color:transparent;
+    user-select:none; -webkit-user-select:none; touch-action:none; }
+  #c { position:fixed; left:0; top:0; display:block; }
+  #char-el {
+    position:fixed; left:0; top:0; pointer-events:none; z-index:5;
+    transform-origin:50% 100%; mix-blend-mode:screen; will-change:transform;
+  }
+  #char-img { width:22.5px; height:auto; display:block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="char-el"><img id="char-img" src="images/gzl.png" alt=""></div>
+<script>
+"use strict";
+
+// ===================== CONSTANTS =====================
+const CITIES = [
+  { name:'宜昌',   sky:['#1a3a5c','#2d6a8a'], glow:'#4db8d4', buildings:['#2a5f7a','#1e4a61','#3a7a8a'], ground:'#2d5a3d', accent:'#5bc8d4' },
+  { name:'六盘水', sky:['#1a1a2e','#2d2d44'], glow:'#7a6a8a', buildings:['#3a3a4a','#2a2a3a','#4a3a5a'], ground:'#2a2a2a', accent:'#8a7a9a' },
+  { name:'淄博',   sky:['#3a1a0a','#6a3a1a'], glow:'#ff8a3a', buildings:['#7a3a1a','#5a2a0a','#8a4a2a'], ground:'#3a2a1a', accent:'#ff6a2a' },
+  { name:'深圳',   sky:['#0a1a3a','#1a3a6a'], glow:'#00d4ff', buildings:['#1a4a7a','#0a2a5a','#2a5a8a'], ground:'#1a2a1a', accent:'#00aaff' },
+  { name:'广州',   sky:['#2a1a0a','#5a3a1a'], glow:'#ffcc44', buildings:['#6a4a2a','#4a3a1a','#7a5a2a'], ground:'#2a3a1a', accent:'#ffaa22' },
+  { name:'重庆',   sky:['#1a0a2a','#3a1a4a'], glow:'#ff44aa', buildings:['#4a1a5a','#3a0a4a','#5a2a6a'], ground:'#1a1a2a', accent:'#ff22cc' },
+  { name:'北京',   sky:['#1a0a0a','#3a1a1a'], glow:'#cc2222', buildings:['#4a1a1a','#6a2a2a','#3a0a0a'], ground:'#2a1a1a', accent:'#ffcc00' },
+  { name:'上海',   sky:['#0a1a2a','#2a3a5a'], glow:'#ffaa44', buildings:['#3a4a6a','#2a3a5a','#4a5a7a'], ground:'#1a2a2a', accent:'#ffcc88' },
+  { name:'首尔',   sky:['#1a0a2a','#3a1a4a'], glow:'#ff88cc', buildings:['#4a2a5a','#3a1a4a','#5a3a6a'], ground:'#2a1a3a', accent:'#ff66bb' },
+  { name:'西雅图', sky:['#1a2a3a','#2a3a4a'], glow:'#88aacc', buildings:['#3a4a5a','#2a3a4a','#4a5a6a'], ground:'#2a3a2a', accent:'#aaccee' },
+  { name:'洛杉矶', sky:['#3a1a0a','#6a3a2a'], glow:'#ff8844', buildings:['#5a3a2a','#7a4a3a','#4a2a1a'], ground:'#3a2a1a', accent:'#ff6622' },
+  { name:'亚特兰大',sky:['#2a1a0a','#4a2a1a'], glow:'#cc8844', buildings:['#4a2a1a','#5a3a2a','#6a4a3a'], ground:'#2a1a1a', accent:'#dd9955' },
+];
+
+const DIR = {
+  front: { dc:  0, dr: 1 },
+  left:  { dc: -1, dr: 0 },
+  right: { dc:  1, dr: 0 },
+};
+
+const BASE_TILE_W = 96, BASE_TILE_H = 48, BASE_TILE_Z = 40;
+
+// ===================== CANVAS / SIZE =====================
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const charEl = document.getElementById('char-el');
+const charImg = document.getElementById('char-img');
+
+let W = 0, H = 0, DPR = 1, SCALE = 1;
+let TILE_W = BASE_TILE_W, TILE_H = BASE_TILE_H, TILE_Z = BASE_TILE_Z;
+
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  SCALE = Math.min(W, H) / 600;
+  TILE_W = BASE_TILE_W * SCALE;
+  TILE_H = BASE_TILE_H * SCALE;
+  TILE_Z = BASE_TILE_Z * SCALE;
+  charImg.style.width = (22.5 * SCALE) + 'px';
+}
+window.addEventListener('resize', resize);
+
+// ===================== HELPERS =====================
+function isoX(col, row) { return (col - row) * (TILE_W / 2); }
+function isoY(col, row) { return (col + row) * (TILE_H / 2); }
+function camIsoX() { return isoX(camCol, camRow); }
+function camIsoY() { return isoY(camCol, camRow); }
+
+function projectToScreen(col, row) {
+  return {
+    x: W / 2 + isoX(col, row) - camIsoX(),
+    y: H * 0.42 + isoY(col, row) - camIsoY() - TILE_Z,
+  };
+}
+
+// deterministic RNG seeded by integer (Lehmer)
+function seededRand(seed) {
+  let s = seed % 2147483647;
+  if (s <= 0) s += 2147483646;
+  return function () {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+function cityNameSeed(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 131 + name.charCodeAt(i)) % 2147483647;
+  return h + 12345;
+}
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  r = Math.max(0, Math.min(255, r + amt));
+  g = Math.max(0, Math.min(255, g + amt));
+  b = Math.max(0, Math.min(255, b + amt));
+  return 'rgb(' + r + ',' + g + ',' + b + ')';
+}
+
+function drawCube(ctx, sx, sy, w, h, z, topColor, leftColor, rightColor) {
+  ctx.beginPath();
+  ctx.moveTo(sx,       sy);
+  ctx.lineTo(sx + w/2, sy + h/2);
+  ctx.lineTo(sx,       sy + h);
+  ctx.lineTo(sx - w/2, sy + h/2);
+  ctx.closePath();
+  ctx.fillStyle = topColor; ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(sx - w/2, sy + h/2);
+  ctx.lineTo(sx,       sy + h);
+  ctx.lineTo(sx,       sy + h + z);
+  ctx.lineTo(sx - w/2, sy + h/2 + z);
+  ctx.closePath();
+  ctx.fillStyle = leftColor; ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(sx + w/2, sy + h/2);
+  ctx.lineTo(sx,       sy + h);
+  ctx.lineTo(sx,       sy + h + z);
+  ctx.lineTo(sx + w/2, sy + h/2 + z);
+  ctx.closePath();
+  ctx.fillStyle = rightColor; ctx.fill();
+}
+
+// ===================== GAME STATE =====================
+let state = 'start';        // start | ready | charge | jumping | dead
+let plats = [];
+let lastDir = null;
+let score = 0;
+let best = loadBest();
+let camCol = 0, camRow = 0;
+
+let cityIndex = 0;
+let cityFade = 1;           // 0->1 fade-in of current city
+
+let chosenDir = null;
+let chargeT = 0;
+let charging = false;
+let deadFrames = 0;
+let comboCount = 0;
+
+let nextCityPopup = { text: '', life: 0 };
+
+const ch = {
+  col: 0, row: 0,
+  screenX: 0, screenY: 0,
+  jumpZ: 0, jumping: false, jumpT: 0,
+  fromCol: 0, fromRow: 0, toCol: 0, toRow: 0,
+  sqX: 1, sqY: 1,
+  dying: false, dieFall: 0, dieVX: 0, dieVY: 0, dieZ: 0,
+  willLand: null, jumpDist: 0, targetDist: 0, jumpFrames: 45,
+};
+
+let parts = [];
+let popups = [];
+let occupiedCells = new Set();
+
+// ===================== PATH GENERATION =====================
+function validDirs(ld) {
+  if (ld === 'left')  return ['left', 'front'];
+  if (ld === 'right') return ['right', 'front'];
+  return ['left', 'front', 'right'];
+}
+function addPlat() {
+  const last = plats[plats.length - 1];
+  const dist = Math.floor(Math.random() * 4) + 2;
+  const opts = validDirs(last.dir);
+  const free = opts.filter(d => {
+    const dd = DIR[d];
+    return !occupiedCells.has((last.col + dist * dd.dc) + ',' + (last.row + dist * dd.dr));
+  });
+  const choices = free.length > 0 ? free : opts;
+  const dir = choices[Math.floor(Math.random() * choices.length)];
+  const d = DIR[dir];
+  const nc = last.col + d.dc * dist, nr = last.row + d.dr * dist;
+  occupiedCells.add(nc + ',' + nr);
+  plats.push({ col: nc, row: nr, dir: dir, dist: dist });
+}
+function indexOfChar() {
+  return plats.findIndex(p => p.col === ch.col && p.row === ch.row);
+}
+function nextDirOf() {
+  const idx = indexOfChar();
+  if (idx === -1) return null;
+  return plats[idx + 1]?.dir ?? null;
+}
+function nextDistOf() {
+  const idx = indexOfChar();
+  if (idx === -1) return 3;
+  return plats[idx + 1]?.dist ?? 3;
+}
+function ensureAhead() {
+  while (plats.length < indexOfChar() + 7) addPlat();
+}
+
+// ===================== RESET =====================
+function reset() {
+  occupiedCells = new Set(['0,0']);
+  plats = [{ col: 0, row: 0, dir: null, dist: 0 }];
+  for (let i = 0; i < 7; i++) addPlat();
+  ch.col = 0; ch.row = 0;
+  ch.jumpZ = 0; ch.jumping = false; ch.jumpT = 0;
+  ch.sqX = 1; ch.sqY = 1;
+  ch.dying = false; ch.dieFall = 0; ch.dieZ = 0; ch.dieVX = 0; ch.dieVY = 0;
+  ch.willLand = null;
+  camCol = ch.col; camRow = ch.row;
+  lastDir = null;
+  score = 0;
+  cityIndex = 0; cityFade = 1;
+  chosenDir = null; chargeT = 0; charging = false; deadFrames = 0;
+  comboCount = 0;
+  parts = [];
+  popups = [];
+  nextCityPopup = { text: '', life: 0 };
+  state = 'start';
+  charEl.style.opacity = '1';
+}
+
+// ===================== INPUT =====================
+function onRelease() {
+  if (state === 'charge' && charging) {
+    charging = false;
+    startJump();
+  }
+}
+
+canvas.addEventListener('mousedown', () => {
+  if (state === 'start') { state = 'ready'; }
+  else if (state === 'ready') {
+    chosenDir = nextDirOf() || 'front';
+    state = 'charge';
+    charging = true;
+    chargeT = 0;
+  }
+  else if (state === 'dead' && deadFrames > 55) reset();
+});
+canvas.addEventListener('mouseup', () => {
+  if (state === 'charge' && charging) onRelease();
+});
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (state === 'start') { state = 'ready'; }
+  else if (state === 'ready') {
+    chosenDir = nextDirOf() || 'front';
+    state = 'charge';
+    charging = true;
+    chargeT = 0;
+  }
+  else if (state === 'dead' && deadFrames > 55) reset();
+}, { passive: false });
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (state === 'charge' && charging) onRelease();
+}, { passive: false });
+
+// ===================== JUMP / DIE =====================
+function startJump() {
+  playSound('jump');
+  const idx = indexOfChar();
+  if (idx === -1) { dieJump(); return; }
+  const nextP = plats[idx + 1];
+  if (!nextP) { dieJump(); return; }
+  const d = DIR[chosenDir];
+  const actualDist = 2 + chargeT * 3;
+  const targetDist = nextP.dist;
+  const delta = Math.abs(actualDist - targetDist);
+  const successThreshold = targetDist / 2;
+  let willLand;
+  if (delta <= 0.2) willLand = 'center';
+  else if (delta <= successThreshold) willLand = 'normal';
+  else willLand = 'miss';
+  ch.fromCol = ch.col; ch.fromRow = ch.row;
+  if (willLand !== 'miss') {
+    ch.toCol = nextP.col;
+    ch.toRow = nextP.row;
+  } else {
+    ch.toCol = ch.col + d.dc * actualDist;
+    ch.toRow = ch.row + d.dr * actualDist;
+  }
+  ch.willLand = willLand;
+  ch.jumpDist = actualDist;
+  ch.targetDist = targetDist;
+  ch.jumpFrames = Math.round(25 + Math.max(actualDist, targetDist) * 8);
+  ch.jumping = true;
+  ch.jumpT = 0;
+  state = 'jumping';
+}
+function landed() {
+  if (ch.willLand === 'miss') {
+    dieJump();
+    return;
+  }
+  ch.col = ch.toCol; ch.row = ch.toRow;
+  ch.jumping = false; ch.jumpZ = 0; ch.jumpT = 0;
+  ch.sqX = 1; ch.sqY = 1;
+  lastDir = chosenDir;
+  if (ch.willLand === 'center') {
+    playSound('perfect');
+    comboCount++;
+    const gain = Math.pow(2, Math.min(comboCount, 10));
+    score += gain;
+    spawnScorePopup(gain);
+  } else {
+    playSound('land');
+    comboCount = 0;
+    score += 1;
+    spawnScorePopup(1);
+  }
+  spawnLandParts();
+  const ci = Math.floor(score / 100) % CITIES.length;
+  if (ci !== cityIndex) { cityIndex = ci; cityFade = 0; spawnCityTransitionPopup(CITIES[ci].name); }
+  const charIdx = indexOfChar();
+  if (charIdx > 3) {
+    const removed = plats.splice(0, charIdx - 2);
+    for (const p of removed) occupiedCells.delete(p.col + ',' + p.row);
+  }
+  ensureAhead();
+  if (score > best) { best = score; saveBest(best); }
+  chosenDir = null; chargeT = 0;
+  state = 'ready';
+}
+function dieWrong(dir) {
+  const d = DIR[dir];
+  ch.jumping = false;
+  ch.dying = true; ch.dieFall = 0; ch.dieZ = 0;
+  ch.dieVX = isoX(d.dc, d.dr) * 0.06;
+  ch.dieVY = 1;
+  spawnDeathParts();
+  state = 'dead'; deadFrames = 0;
+}
+function dieJump() {
+  playSound('miss');
+  ch.jumping = false;
+  ch.dying = true; ch.dieFall = 0; ch.dieZ = 0;
+  ch.dieVX = (Math.random() - 0.5) * 4;
+  ch.dieVY = 1;
+  spawnDeathParts();
+  state = 'dead'; deadFrames = 0;
+}
+
+// ===================== UPDATE =====================
+function update() {
+  camCol += (ch.col - camCol) * 0.1;
+  camRow += (ch.row - camRow) * 0.1;
+  if (cityFade < 1) cityFade = Math.min(1, cityFade + 1 / 30);
+  if (nextCityPopup.life > 0) nextCityPopup.life -= 0.015;
+  if (state === 'charge' && charging) {
+    chargeT = Math.min(1, chargeT + (1 / 60) / 1.8);
+    ch.sqY = 1 - chargeT * 0.28;
+    ch.sqX = 1 + chargeT * 0.2;
+    if (chargeT >= 0.95) { charging = false; startJump(); }
+  }
+  if (state === 'jumping' && ch.jumping) {
+    const frames = ch.jumpFrames || 45;
+    ch.jumpT = Math.min(1, ch.jumpT + 1 / frames);
+    const t = ch.jumpT;
+    ch.col = ch.fromCol + (ch.toCol - ch.fromCol) * t;
+    ch.row = ch.fromRow + (ch.toRow - ch.fromRow) * t;
+    ch.jumpZ = Math.sin(Math.PI * t) * TILE_Z * Math.max(ch.jumpDist || 1, ch.targetDist || 1) * 0.8;
+    if (ch.jumpT >= 1) landed();
+  }
+  if (state === 'dead' && ch.dying) {
+    deadFrames++;
+    ch.dieFall += 1;
+    ch.dieVY += 0.6;
+    ch.dieZ += ch.dieVY;
+  } else if (state === 'dead') {
+    deadFrames++;
+  }
+  updateParts();
+  updatePopups();
+}
+
+// ===================== DRAW =====================
+function cur() { return CITIES[cityIndex]; }
+
+function drawLandmarkSilhouettes(city) {
+  ctx.save();
+  ctx.globalAlpha = 0.14 * cityFade;
+  const parallax = -camIsoX() * 0.1;
+  const horizon = H * 0.5;
+  const baseY = horizon + 20 * SCALE;
+  const landmarks = [];
+  for (let i = 0; i < 5; i++) landmarks.push({ x: parallax + i * 500 * SCALE, i: i });
+
+  for (const lm of landmarks) {
+    const x = lm.x + (lm.i * 500) * SCALE;
+    if (x < -250 * SCALE || x > W + 250 * SCALE) continue;
+
+    if (city.name === '宜昌') {
+      // 三峡大坝 - 超级详细版
+      // 远景山体（深色）
+      ctx.fillStyle = '#4a6a7a';
+      ctx.beginPath();
+      ctx.moveTo(x - 120 * SCALE, baseY);
+      ctx.lineTo(x - 100 * SCALE, baseY - 90 * SCALE);
+      ctx.lineTo(x - 60 * SCALE, baseY - 100 * SCALE);
+      ctx.lineTo(x - 30 * SCALE, baseY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(x + 30 * SCALE, baseY);
+      ctx.lineTo(x + 60 * SCALE, baseY - 100 * SCALE);
+      ctx.lineTo(x + 100 * SCALE, baseY - 90 * SCALE);
+      ctx.lineTo(x + 120 * SCALE, baseY);
+      ctx.closePath();
+      ctx.fill();
+
+      // 大坝主体（浅灰）
+      ctx.fillStyle = '#9a9a9a';
+      ctx.fillRect(x - 95 * SCALE, baseY - 60 * SCALE, 190 * SCALE, 60 * SCALE);
+
+      // 大坝细节纹理
+      ctx.strokeStyle = '#7a7a7a';
+      ctx.lineWidth = 1 * SCALE;
+      for (let j = 0; j < 10; j++) {
+        ctx.beginPath();
+        ctx.moveTo(x - 90 * SCALE + j * 20 * SCALE, baseY - 60 * SCALE);
+        ctx.lineTo(x - 90 * SCALE + j * 20 * SCALE, baseY);
+        ctx.stroke();
+      }
+
+      // 水闸门（8个，竖长条）
+      ctx.fillStyle = '#444444';
+      for (let j = 0; j < 8; j++) {
+        ctx.fillRect(x - 75 * SCALE + j * 20 * SCALE, baseY - 55 * SCALE, 6 * SCALE, 45 * SCALE);
+      }
+
+      // 闸门间隙（深色）
+      ctx.fillStyle = '#222222';
+      for (let j = 0; j < 7; j++) {
+        ctx.fillRect(x - 72 * SCALE + j * 20 * SCALE, baseY - 55 * SCALE, 2 * SCALE, 45 * SCALE);
+      }
+
+      // 白色水流喷出（更多、更强）
+      ctx.fillStyle = '#ffffff';
+      for (let j = 0; j < 8; j++) {
+        ctx.beginPath();
+        ctx.moveTo(x - 72 * SCALE + j * 20 * SCALE, baseY - 10 * SCALE);
+        ctx.lineTo(x - 70 * SCALE + j * 20 * SCALE, baseY + 25 * SCALE);
+        ctx.lineTo(x - 68 * SCALE + j * 20 * SCALE, baseY + 25 * SCALE);
+        ctx.lineTo(x - 66 * SCALE + j * 20 * SCALE, baseY - 10 * SCALE);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // 大坝顶部防护栏
+      ctx.fillStyle = '#666666';
+      ctx.fillRect(x - 95 * SCALE, baseY - 65 * SCALE, 190 * SCALE, 4 * SCALE);
+
+      // 左右进水口塔楼
+      ctx.fillStyle = '#7a7a7a';
+      ctx.fillRect(x - 105 * SCALE, baseY - 80 * SCALE, 15 * SCALE, 20 * SCALE);
+      ctx.fillRect(x + 90 * SCALE, baseY - 80 * SCALE, 15 * SCALE, 20 * SCALE);
+
+    } else if (city.name === '六盘水') {
+      // 山区工业城 - 锯齿状山峰与工业设施
+      ctx.fillStyle = '#7a6a5a';
+      // 四个锯齿状山峰
+      ctx.beginPath();
+      ctx.moveTo(x - 110 * SCALE, baseY);
+      ctx.lineTo(x - 85 * SCALE, baseY - 110 * SCALE);
+      ctx.lineTo(x - 60 * SCALE, baseY - 40 * SCALE);
+      ctx.lineTo(x - 40 * SCALE, baseY);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(x - 35 * SCALE, baseY);
+      ctx.lineTo(x - 15 * SCALE, baseY - 120 * SCALE);
+      ctx.lineTo(x + 10 * SCALE, baseY - 50 * SCALE);
+      ctx.lineTo(x + 30 * SCALE, baseY);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(x + 35 * SCALE, baseY);
+      ctx.lineTo(x + 55 * SCALE, baseY - 95 * SCALE);
+      ctx.lineTo(x + 75 * SCALE, baseY - 35 * SCALE);
+      ctx.lineTo(x + 95 * SCALE, baseY);
+      ctx.closePath();
+      ctx.fill();
+
+      // 山体纹理线条
+      ctx.strokeStyle = '#5a4a3a';
+      ctx.lineWidth = 2 * SCALE;
+      for (let i = 0; i < 6; i++) {
+        ctx.beginPath();
+        ctx.moveTo(x - 100 * SCALE, baseY - 20 * SCALE - i * 18 * SCALE);
+        ctx.lineTo(x + 90 * SCALE, baseY - 20 * SCALE - i * 18 * SCALE);
+        ctx.stroke();
+      }
+
+      // 工业烟囱（4个）
+      ctx.fillStyle = '#4a4a4a';
+      ctx.fillRect(x - 70 * SCALE, baseY - 75 * SCALE, 8 * SCALE, 50 * SCALE);
+      ctx.fillRect(x - 35 * SCALE, baseY - 85 * SCALE, 8 * SCALE, 60 * SCALE);
+      ctx.fillRect(x + 10 * SCALE, baseY - 70 * SCALE, 8 * SCALE, 45 * SCALE);
+      ctx.fillRect(x + 55 * SCALE, baseY - 65 * SCALE, 8 * SCALE, 40 * SCALE);
+
+      // 烟囱顶部
+      ctx.fillStyle = '#333333';
+      for (let xx of [-70, -35, 10, 55]) {
+        ctx.fillRect(x + xx * SCALE, baseY - 80 * SCALE - (xx === -35 ? 5 : xx === 10 ? 3 : 2) * SCALE, 12 * SCALE, 4 * SCALE);
+      }
+
+      // 工业建筑
+      ctx.fillStyle = '#8a7a6a';
+      ctx.fillRect(x - 50 * SCALE, baseY - 60 * SCALE, 30 * SCALE, 25 * SCALE);
+      ctx.fillRect(x + 20 * SCALE, baseY - 50 * SCALE, 25 * SCALE, 20 * SCALE);
+
+      // 雾气效果（多层）
+      ctx.fillStyle = 'rgba(128, 128, 128, 0.25)';
+      ctx.fillRect(x - 110 * SCALE, baseY - 60 * SCALE, 220 * SCALE, 25 * SCALE);
+      ctx.fillStyle = 'rgba(128, 128, 128, 0.15)';
+      ctx.fillRect(x - 110 * SCALE, baseY - 35 * SCALE, 220 * SCALE, 20 * SCALE);
+
+    } else if (city.name === '淄博') {
+      // 陶瓷古城
+      // 古城墙（砖红色、有凹凸感）
+      ctx.fillStyle = '#b85a3a';
+      ctx.fillRect(x - 90 * SCALE, baseY - 85 * SCALE, 180 * SCALE, 85 * SCALE);
+
+      // 城墙凹凸效果
+      ctx.fillStyle = '#a54a2a';
+      for (let j = 0; j < 12; j++) {
+        ctx.fillRect(x - 80 * SCALE + j * 15 * SCALE, baseY - 85 * SCALE, 8 * SCALE, 8 * SCALE);
+        ctx.fillRect(x - 80 * SCALE + j * 15 * SCALE, baseY - 45 * SCALE, 8 * SCALE, 8 * SCALE);
+      }
+
+      // 城墙上的灯笼（小圆形）
+      ctx.fillStyle = '#ffcc44';
+      for (let j = 0; j < 6; j++) {
+        ctx.beginPath();
+        ctx.arc(x - 65 * SCALE + j * 30 * SCALE, baseY - 95 * SCALE, 6 * SCALE, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 城内陶瓷窑炉（烟囱风格）
+      ctx.fillStyle = '#8a4a2a';
+      ctx.fillRect(x - 60 * SCALE, baseY - 70 * SCALE, 12 * SCALE, 40 * SCALE);
+      ctx.fillRect(x - 25 * SCALE, baseY - 75 * SCALE, 12 * SCALE, 45 * SCALE);
+      ctx.fillRect(x + 15 * SCALE, baseY - 65 * SCALE, 12 * SCALE, 35 * SCALE);
+
+      // 烟囱顶部
+      ctx.fillStyle = '#6a3a1a';
+      ctx.fillRect(x - 62 * SCALE, baseY - 75 * SCALE, 16 * SCALE, 8 * SCALE);
+      ctx.fillRect(x - 27 * SCALE, baseY - 82 * SCALE, 16 * SCALE, 10 * SCALE);
+      ctx.fillRect(x + 13 * SCALE, baseY - 72 * SCALE, 16 * SCALE, 8 * SCALE);
+
+    } else if (city.name === '深圳') {
+      // 现代摩天楼群 - 5栋彩色高楼
+      // 楼1（蓝色）
+      ctx.fillStyle = '#0a4a8a';
+      ctx.fillRect(x - 80 * SCALE, baseY - 160 * SCALE, 32 * SCALE, 160 * SCALE);
+      ctx.fillStyle = '#00c4ff';
+      for (let wy = baseY - 150 * SCALE; wy < baseY - 10 * SCALE; wy += 10 * SCALE) {
+        for (let wx = x - 75 * SCALE; wx < x - 50 * SCALE; wx += 9 * SCALE) {
+          ctx.fillRect(wx, wy, 4 * SCALE, 4 * SCALE);
+        }
+      }
+
+      // 楼2（绿色）
+      ctx.fillStyle = '#1a6a3a';
+      ctx.fillRect(x - 42 * SCALE, baseY - 180 * SCALE, 32 * SCALE, 180 * SCALE);
+      ctx.fillStyle = '#4aff7a';
+      for (let wy = baseY - 170 * SCALE; wy < baseY - 10 * SCALE; wy += 10 * SCALE) {
+        for (let wx = x - 37 * SCALE; wx < x - 12 * SCALE; wx += 9 * SCALE) {
+          ctx.fillRect(wx, wy, 4 * SCALE, 4 * SCALE);
+        }
+      }
+
+      // 楼3（黄色最高）
+      ctx.fillStyle = '#7a6a00';
+      ctx.fillRect(x - 4 * SCALE, baseY - 195 * SCALE, 32 * SCALE, 195 * SCALE);
+      ctx.fillStyle = '#ffff55';
+      for (let wy = baseY - 185 * SCALE; wy < baseY - 10 * SCALE; wy += 10 * SCALE) {
+        for (let wx = x + 1 * SCALE; wx < x + 26 * SCALE; wx += 9 * SCALE) {
+          ctx.fillRect(wx, wy, 4 * SCALE, 4 * SCALE);
+        }
+      }
+
+      // 楼4（紫红色）
+      ctx.fillStyle = '#5a1a7a';
+      ctx.fillRect(x + 34 * SCALE, baseY - 175 * SCALE, 32 * SCALE, 175 * SCALE);
+      ctx.fillStyle = '#dd66ff';
+      for (let wy = baseY - 165 * SCALE; wy < baseY - 10 * SCALE; wy += 10 * SCALE) {
+        for (let wx = x + 39 * SCALE; wx < x + 64 * SCALE; wx += 9 * SCALE) {
+          ctx.fillRect(wx, wy, 4 * SCALE, 4 * SCALE);
+        }
+      }
+
+      // 楼5（橙色）
+      ctx.fillStyle = '#8a4a00';
+      ctx.fillRect(x + 72 * SCALE, baseY - 150 * SCALE, 32 * SCALE, 150 * SCALE);
+      ctx.fillStyle = '#ffaa33';
+      for (let wy = baseY - 140 * SCALE; wy < baseY - 10 * SCALE; wy += 10 * SCALE) {
+        for (let wx = x + 77 * SCALE; wx < x + 102 * SCALE; wx += 9 * SCALE) {
+          ctx.fillRect(wx, wy, 4 * SCALE, 4 * SCALE);
+        }
+      }
+
+      // 楼顶尖刺与天线
+      ctx.strokeStyle = '#00c4ff';
+      ctx.lineWidth = 3 * SCALE;
+      for (let xx of [-63, -25, 12, 50, 88]) {
+        ctx.beginPath();
+        ctx.moveTo(x + xx * SCALE, baseY - (160 + 20 + (xx === 12 ? 35 : 20)) * SCALE);
+        ctx.lineTo(x + xx * SCALE, baseY - (160 + 50 + (xx === 12 ? 35 : 20)) * SCALE);
+        ctx.stroke();
+      }
+
+      // 建筑间空隙阴影
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.fillRect(x - 45 * SCALE, baseY - 150 * SCALE, 6 * SCALE, 150 * SCALE);
+      ctx.fillRect(x + 31 * SCALE, baseY - 160 * SCALE, 6 * SCALE, 160 * SCALE);
+      ctx.fillRect(x + 69 * SCALE, baseY - 180 * SCALE, 6 * SCALE, 180 * SCALE);
+
+    } else if (city.name === '广州') {
+      // 广州塔
+      // 塔基座（宽底部）
+      ctx.fillStyle = '#e84a2a';
+      ctx.fillRect(x - 40 * SCALE, baseY - 30 * SCALE, 80 * SCALE, 30 * SCALE);
+
+      // 腰细塔身主体（红色/粉色）
+      ctx.fillStyle = '#ff4a6a';
+      // 下半部分
+      ctx.beginPath();
+      ctx.moveTo(x - 15 * SCALE, baseY - 30 * SCALE);
+      ctx.lineTo(x + 15 * SCALE, baseY - 30 * SCALE);
+      ctx.lineTo(x + 12 * SCALE, baseY - 100 * SCALE);
+      ctx.lineTo(x - 12 * SCALE, baseY - 100 * SCALE);
+      ctx.closePath();
+      ctx.fill();
+
+      // 上半部分（更细）
+      ctx.beginPath();
+      ctx.moveTo(x - 12 * SCALE, baseY - 100 * SCALE);
+      ctx.lineTo(x + 12 * SCALE, baseY - 100 * SCALE);
+      ctx.lineTo(x + 8 * SCALE, baseY - 160 * SCALE);
+      ctx.lineTo(x - 8 * SCALE, baseY - 160 * SCALE);
+      ctx.closePath();
+      ctx.fill();
+
+      // 大球1（观景台）
+      ctx.fillStyle = '#ff5a7a';
+      ctx.beginPath();
+      ctx.arc(x, baseY - 110 * SCALE, 18 * SCALE, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 大球2（观景台）
+      ctx.fillStyle = '#ff6a8a';
+      ctx.beginPath();
+      ctx.arc(x, baseY - 50 * SCALE, 16 * SCALE, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 塔顶尖刺
+      ctx.fillStyle = '#ff4a6a';
+      ctx.beginPath();
+      ctx.moveTo(x, baseY - 165 * SCALE);
+      ctx.lineTo(x - 5 * SCALE, baseY - 180 * SCALE);
+      ctx.lineTo(x + 5 * SCALE, baseY - 180 * SCALE);
+      ctx.closePath();
+      ctx.fill();
+
+      // 周围普通高楼
+      ctx.fillStyle = '#5a6a7a';
+      ctx.fillRect(x - 85 * SCALE, baseY - 90 * SCALE, 30 * SCALE, 90 * SCALE);
+      ctx.fillRect(x + 55 * SCALE, baseY - 75 * SCALE, 30 * SCALE, 75 * SCALE);
+      ctx.fillRect(x - 100 * SCALE, baseY - 60 * SCALE, 25 * SCALE, 60 * SCALE);
+      ctx.fillRect(x + 75 * SCALE, baseY - 100 * SCALE, 25 * SCALE, 100 * SCALE);
+
+    } else if (city.name === '重庆') {
+      // 山城建筑
+      // 悬崖峭壁（深灰色有纹理）
+      ctx.fillStyle = '#3a3a3a';
+      ctx.beginPath();
+      ctx.moveTo(x - 100 * SCALE, baseY);
+      ctx.lineTo(x - 90 * SCALE, baseY - 60 * SCALE);
+      ctx.lineTo(x - 70 * SCALE, baseY - 120 * SCALE);
+      ctx.lineTo(x - 50 * SCALE, baseY - 140 * SCALE);
+      ctx.lineTo(x + 50 * SCALE, baseY - 140 * SCALE);
+      ctx.lineTo(x + 70 * SCALE, baseY - 120 * SCALE);
+      ctx.lineTo(x + 90 * SCALE, baseY - 60 * SCALE);
+      ctx.lineTo(x + 100 * SCALE, baseY);
+      ctx.closePath();
+      ctx.fill();
+
+      // 岩石纹理
+      ctx.strokeStyle = '#2a2a2a';
+      ctx.lineWidth = 2 * SCALE;
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        ctx.moveTo(x - 80 * SCALE, baseY - 30 * SCALE - i * 25 * SCALE);
+        ctx.lineTo(x + 80 * SCALE, baseY - 30 * SCALE - i * 25 * SCALE);
+        ctx.stroke();
+      }
+
+      // 山腰多层建筑（卡通小房子风格）
+      // 第一层
+      ctx.fillStyle = '#ff8a4a';
+      ctx.fillRect(x - 75 * SCALE, baseY - 90 * SCALE, 35 * SCALE, 25 * SCALE);
+      ctx.fillRect(x - 35 * SCALE, baseY - 95 * SCALE, 35 * SCALE, 30 * SCALE);
+      ctx.fillRect(x + 5 * SCALE, baseY - 88 * SCALE, 35 * SCALE, 23 * SCALE);
+      ctx.fillRect(x + 50 * SCALE, baseY - 93 * SCALE, 35 * SCALE, 28 * SCALE);
+
+      // 第二层
+      ctx.fillStyle = '#ff6a2a';
+      ctx.fillRect(x - 60 * SCALE, baseY - 130 * SCALE, 30 * SCALE, 20 * SCALE);
+      ctx.fillRect(x + 20 * SCALE, baseY - 125 * SCALE, 30 * SCALE, 18 * SCALE);
+
+      // 窗户灯光效果
+      ctx.fillStyle = '#ffff88';
+      ctx.fillRect(x - 70 * SCALE, baseY - 85 * SCALE, 5 * SCALE, 5 * SCALE);
+      ctx.fillRect(x - 60 * SCALE, baseY - 85 * SCALE, 5 * SCALE, 5 * SCALE);
+      ctx.fillRect(x - 30 * SCALE, baseY - 90 * SCALE, 5 * SCALE, 5 * SCALE);
+      ctx.fillRect(x - 20 * SCALE, baseY - 90 * SCALE, 5 * SCALE, 5 * SCALE);
+      ctx.fillRect(x + 25 * SCALE, baseY - 125 * SCALE, 4 * SCALE, 4 * SCALE);
+      ctx.fillRect(x + 35 * SCALE, baseY - 125 * SCALE, 4 * SCALE, 4 * SCALE);
+
+      // 楼梯/斜坡连接
+      ctx.strokeStyle = '#8a6a4a';
+      ctx.lineWidth = 3 * SCALE;
+      ctx.beginPath();
+      ctx.moveTo(x - 40 * SCALE, baseY - 90 * SCALE);
+      ctx.lineTo(x - 40 * SCALE, baseY - 110 * SCALE);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(x + 10 * SCALE, baseY - 88 * SCALE);
+      ctx.lineTo(x + 10 * SCALE, baseY - 108 * SCALE);
+      ctx.stroke();
+
+    } else if (city.name === '北京') {
+      // 古都
+      // 城墙（水红色、有方形堡垒）
+      ctx.fillStyle = '#c84a4a';
+      ctx.fillRect(x - 90 * SCALE, baseY - 70 * SCALE, 180 * SCALE, 70 * SCALE);
+
+      // 城墙堡垒（方形）
+      ctx.fillStyle = '#a84a4a';
+      for (let j = 0; j < 4; j++) {
+        ctx.fillRect(x - 70 * SCALE + j * 50 * SCALE, baseY - 85 * SCALE, 15 * SCALE, 15 * SCALE);
+      }
+
+      // 城门（中心）
+      ctx.fillStyle = '#5a3a2a';
+      ctx.fillRect(x - 20 * SCALE, baseY - 60 * SCALE, 40 * SCALE, 60 * SCALE);
+
+      // 城门上的建筑结构
+      ctx.fillStyle = '#8a5a3a';
+      ctx.fillRect(x - 18 * SCALE, baseY - 80 * SCALE, 36 * SCALE, 15 * SCALE);
+
+      // 城墙后的传统屋顶（黄色琉璃）
+      ctx.fillStyle = '#ffcc00';
+      for (let j = 0; j < 3; j++) {
+        ctx.beginPath();
+        ctx.moveTo(x - 70 * SCALE + j * 70 * SCALE, baseY - 70 * SCALE);
+        ctx.lineTo(x - 50 * SCALE + j * 70 * SCALE, baseY - 100 * SCALE);
+        ctx.lineTo(x - 30 * SCALE + j * 70 * SCALE, baseY - 70 * SCALE);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // 远处高楼（现代与传统混合）
+      ctx.fillStyle = '#4a5a6a';
+      ctx.fillRect(x - 110 * SCALE, baseY - 90 * SCALE, 25 * SCALE, 90 * SCALE);
+      ctx.fillRect(x + 85 * SCALE, baseY - 85 * SCALE, 25 * SCALE, 85 * SCALE);
+
+    } else if (city.name === '上海') {
+      // 浦东新区
+      // 东方明珠塔（中心）
+      // 塔身（细）
+      ctx.fillStyle = '#ff4a8a';
+      ctx.fillRect(x - 8 * SCALE, baseY - 170 * SCALE, 16 * SCALE, 170 * SCALE);
+
+      // 大球1（下层观景台）
+      ctx.fillStyle = '#ff6aaa';
+      ctx.beginPath();
+      ctx.arc(x, baseY - 110 * SCALE, 22 * SCALE, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 大球2（上层观景台）
+      ctx.fillStyle = '#ff5a9a';
+      ctx.beginPath();
+      ctx.arc(x, baseY - 155 * SCALE, 20 * SCALE, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 塔顶
+      ctx.fillStyle = '#ff4a8a';
+      ctx.beginPath();
+      ctx.moveTo(x, baseY - 175 * SCALE);
+      ctx.lineTo(x - 6 * SCALE, baseY - 190 * SCALE);
+      ctx.lineTo(x + 6 * SCALE, baseY - 190 * SCALE);
+      ctx.closePath();
+      ctx.fill();
+
+      // 左侧高楼群（渐进式高度）
+      const leftHeights = [90, 120, 140, 150];
+      ctx.fillStyle = '#3a5a8a';
+      for (let j = 0; j < 4; j++) {
+        ctx.fillRect(x - 95 * SCALE + j * 28 * SCALE, baseY - leftHeights[j] * SCALE, 24 * SCALE, leftHeights[j] * SCALE);
+      }
+
+      // 右侧高楼群
+      const rightHeights = [75, 100, 130, 145];
+      ctx.fillStyle = '#4a6a9a';
+      for (let j = 0; j < 4; j++) {
+        ctx.fillRect(x + 25 * SCALE + j * 28 * SCALE, baseY - rightHeights[j] * SCALE, 24 * SCALE, rightHeights[j] * SCALE);
+      }
+
+      // 玻璃反光效果
+      ctx.fillStyle = '#88ddff';
+      ctx.globalAlpha = 0.08 * cityFade;
+      for (let j = 0; j < 4; j++) {
+        for (let wy = baseY - 85 * SCALE; wy < baseY; wy += 15 * SCALE) {
+          ctx.fillRect(x - 93 * SCALE + j * 28 * SCALE + 3 * SCALE, wy, 6 * SCALE, 6 * SCALE);
+        }
+      }
+      for (let j = 0; j < 4; j++) {
+        for (let wy = baseY - 140 * SCALE; wy < baseY; wy += 15 * SCALE) {
+          ctx.fillRect(x + 27 * SCALE + j * 28 * SCALE + 3 * SCALE, wy, 6 * SCALE, 6 * SCALE);
+        }
+      }
+
+      // 底层河流/水景（蓝色）
+      ctx.globalAlpha = 0.06 * cityFade;
+      ctx.fillStyle = '#0088ff';
+      ctx.fillRect(x - 110 * SCALE, baseY - 5 * SCALE, 220 * SCALE, 5 * SCALE);
+      ctx.globalAlpha = 0.12 * cityFade;
+
+    } else if (city.name === '首尔') {
+      // 南山塔城市
+      // 中心圆形观景塔（明亮的红/蓝）
+      // 塔身下部
+      ctx.fillStyle = '#1a5aaa';
+      ctx.fillRect(x - 12 * SCALE, baseY - 120 * SCALE, 24 * SCALE, 120 * SCALE);
+
+      // 主观景球
+      ctx.fillStyle = '#ff3a7a';
+      ctx.beginPath();
+      ctx.arc(x, baseY - 90 * SCALE, 25 * SCALE, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 塔身上部
+      ctx.fillStyle = '#1a5aaa';
+      ctx.fillRect(x - 10 * SCALE, baseY - 145 * SCALE, 20 * SCALE, 25 * SCALE);
+
+      // 小观景台/阳台
+      ctx.fillStyle = '#ff5a9a';
+      for (let j = 0; j < 3; j++) {
+        ctx.fillRect(x - 28 * SCALE, baseY - 120 * SCALE + j * 35 * SCALE, 56 * SCALE, 8 * SCALE);
+      }
+
+      // 塔顶
+      ctx.fillStyle = '#ff3a7a';
+      ctx.beginPath();
+      ctx.moveTo(x, baseY - 150 * SCALE);
+      ctx.lineTo(x - 8 * SCALE, baseY - 170 * SCALE);
+      ctx.lineTo(x + 8 * SCALE, baseY - 170 * SCALE);
+      ctx.closePath();
+      ctx.fill();
+
+      // 周围现代建筑
+      ctx.fillStyle = '#5a7a9a';
+      ctx.fillRect(x - 80 * SCALE, baseY - 85 * SCALE, 35 * SCALE, 85 * SCALE);
+      ctx.fillRect(x + 45 * SCALE, baseY - 95 * SCALE, 35 * SCALE, 95 * SCALE);
+
+      ctx.fillStyle = '#6a8aaa';
+      ctx.fillRect(x - 110 * SCALE, baseY - 65 * SCALE, 30 * SCALE, 65 * SCALE);
+      ctx.fillRect(x + 80 * SCALE, baseY - 75 * SCALE, 30 * SCALE, 75 * SCALE);
+
+      // 下方山丘轮廓
+      ctx.fillStyle = city.glow;
+      ctx.beginPath();
+      ctx.moveTo(x - 120 * SCALE, baseY);
+      ctx.lineTo(x - 80 * SCALE, baseY - 40 * SCALE);
+      ctx.lineTo(x - 40 * SCALE, baseY - 20 * SCALE);
+      ctx.lineTo(x + 40 * SCALE, baseY - 20 * SCALE);
+      ctx.lineTo(x + 80 * SCALE, baseY - 40 * SCALE);
+      ctx.lineTo(x + 120 * SCALE, baseY);
+      ctx.closePath();
+      ctx.fill();
+
+    } else if (city.name === '西雅图') {
+      // Space Needle
+      // 支腿1（左上）
+      ctx.strokeStyle = '#888888';
+      ctx.lineWidth = 4 * SCALE;
+      ctx.beginPath();
+      ctx.moveTo(x - 45 * SCALE, baseY - 30 * SCALE);
+      ctx.lineTo(x - 8 * SCALE, baseY - 100 * SCALE);
+      ctx.stroke();
+
+      // 支腿2（右上）
+      ctx.beginPath();
+      ctx.moveTo(x + 45 * SCALE, baseY - 30 * SCALE);
+      ctx.lineTo(x + 8 * SCALE, baseY - 100 * SCALE);
+      ctx.stroke();
+
+      // 支腿3（左下）
+      ctx.beginPath();
+      ctx.moveTo(x - 50 * SCALE, baseY - 5 * SCALE);
+      ctx.lineTo(x - 8 * SCALE, baseY - 100 * SCALE);
+      ctx.stroke();
+
+      // 支腿4（右下）
+      ctx.beginPath();
+      ctx.moveTo(x + 50 * SCALE, baseY - 5 * SCALE);
+      ctx.lineTo(x + 8 * SCALE, baseY - 100 * SCALE);
+      ctx.stroke();
+
+      // 中心细塔（灰色）
+      ctx.fillStyle = '#666666';
+      ctx.fillRect(x - 5 * SCALE, baseY - 140 * SCALE, 10 * SCALE, 140 * SCALE);
+
+      // 塔身连接盘
+      ctx.fillStyle = '#777777';
+      ctx.fillRect(x - 15 * SCALE, baseY - 105 * SCALE, 30 * SCALE, 8 * SCALE);
+
+      // 飞碟观景台（圆形）
+      ctx.fillStyle = '#888888';
+      ctx.beginPath();
+      ctx.ellipse(x, baseY - 100 * SCALE, 45 * SCALE, 18 * SCALE, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 观景台细节
+      ctx.fillStyle = '#aaaaaa';
+      ctx.beginPath();
+      ctx.ellipse(x, baseY - 100 * SCALE, 42 * SCALE, 15 * SCALE, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 远处白色雪山轮廓
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = 0.04 * cityFade;
+      ctx.beginPath();
+      ctx.moveTo(x - 120 * SCALE, baseY);
+      ctx.lineTo(x - 100 * SCALE, baseY - 60 * SCALE);
+      ctx.lineTo(x - 60 * SCALE, baseY - 80 * SCALE);
+      ctx.lineTo(x - 20 * SCALE, baseY - 50 * SCALE);
+      ctx.lineTo(x, baseY);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(x, baseY);
+      ctx.lineTo(x + 20 * SCALE, baseY - 50 * SCALE);
+      ctx.lineTo(x + 60 * SCALE, baseY - 80 * SCALE);
+      ctx.lineTo(x + 100 * SCALE, baseY - 60 * SCALE);
+      ctx.lineTo(x + 120 * SCALE, baseY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 0.12 * cityFade;
+
+    } else if (city.name === '洛杉矶') {
+      // 好莱坞
+      // 山丘轮廓（暖棕色）
+      ctx.fillStyle = '#8a6a4a';
+      ctx.beginPath();
+      ctx.moveTo(x - 110 * SCALE, baseY);
+      ctx.lineTo(x - 70 * SCALE, baseY - 100 * SCALE);
+      ctx.lineTo(x - 30 * SCALE, baseY - 75 * SCALE);
+      ctx.lineTo(x + 30 * SCALE, baseY - 95 * SCALE);
+      ctx.lineTo(x + 70 * SCALE, baseY - 60 * SCALE);
+      ctx.lineTo(x + 110 * SCALE, baseY);
+      ctx.closePath();
+      ctx.fill();
+
+      // 山丘更深的阴影
+      ctx.fillStyle = '#6a4a2a';
+      ctx.beginPath();
+      ctx.moveTo(x - 110 * SCALE, baseY);
+      ctx.lineTo(x - 70 * SCALE, baseY - 100 * SCALE);
+      ctx.lineTo(x - 70 * SCALE, baseY);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(x + 30 * SCALE, baseY - 95 * SCALE);
+      ctx.lineTo(x + 30 * SCALE, baseY);
+      ctx.lineTo(x + 70 * SCALE, baseY - 60 * SCALE);
+      ctx.closePath();
+      ctx.fill();
+
+      // 大块字母"HOLLYWOOD"（白色）
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold ' + (20 * SCALE) + 'px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('HOLLYWOOD', x, baseY - 50 * SCALE);
+
+      // 星光闪烁效果（小圆形）
+      ctx.fillStyle = '#ffff88';
+      ctx.globalAlpha = 0.04 * cityFade;
+      for (let j = 0; j < 8; j++) {
+        const sx = x - 80 * SCALE + j * 30 * SCALE;
+        const sy = baseY - 30 * SCALE + (j % 2) * 20 * SCALE;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2 * SCALE, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 0.12 * cityFade;
+
+      // 远处建筑轮廓
+      ctx.fillStyle = '#5a4a3a';
+      ctx.fillRect(x - 100 * SCALE, baseY - 50 * SCALE, 20 * SCALE, 50 * SCALE);
+      ctx.fillRect(x + 70 * SCALE, baseY - 60 * SCALE, 25 * SCALE, 60 * SCALE);
+
+    } else if (city.name === '亚特兰大') {
+      // 商业城市
+      // 楼1（左侧，玻璃风格）
+      ctx.fillStyle = '#2a4a7a';
+      ctx.fillRect(x - 90 * SCALE, baseY - 120 * SCALE, 35 * SCALE, 120 * SCALE);
+
+      // 楼1窗户
+      ctx.fillStyle = '#5aaaaff';
+      ctx.globalAlpha = 0.08 * cityFade;
+      for (let wy = baseY - 110 * SCALE; wy < baseY - 10 * SCALE; wy += 12 * SCALE) {
+        for (let wx = x - 85 * SCALE; wx < x - 60 * SCALE; wx += 10 * SCALE) {
+          ctx.fillRect(wx, wy, 6 * SCALE, 6 * SCALE);
+        }
+      }
+      ctx.globalAlpha = 0.12 * cityFade;
+
+      // 楼2（中央最高，尖塔顶）
+      ctx.fillStyle = '#1a3a5a';
+      ctx.fillRect(x - 35 * SCALE, baseY - 160 * SCALE, 35 * SCALE, 160 * SCALE);
+
+      // 楼2窗户
+      ctx.fillStyle = '#88ccff';
+      ctx.globalAlpha = 0.08 * cityFade;
+      for (let wy = baseY - 150 * SCALE; wy < baseY - 10 * SCALE; wy += 12 * SCALE) {
+        for (let wx = x - 32 * SCALE; wx < x - 7 * SCALE; wx += 10 * SCALE) {
+          ctx.fillRect(wx, wy, 6 * SCALE, 6 * SCALE);
+        }
+      }
+      ctx.globalAlpha = 0.12 * cityFade;
+
+      // 楼2尖塔顶
+      ctx.fillStyle = '#1a3a5a';
+      ctx.beginPath();
+      ctx.moveTo(x - 17 * SCALE, baseY - 160 * SCALE);
+      ctx.lineTo(x - 22 * SCALE, baseY - 185 * SCALE);
+      ctx.lineTo(x - 12 * SCALE, baseY - 185 * SCALE);
+      ctx.closePath();
+      ctx.fill();
+
+      // 楼3（右侧）
+      ctx.fillStyle = '#3a5a8a';
+      ctx.fillRect(x + 10 * SCALE, baseY - 105 * SCALE, 35 * SCALE, 105 * SCALE);
+
+      // 楼3窗户
+      ctx.fillStyle = '#88ccff';
+      ctx.globalAlpha = 0.08 * cityFade;
+      for (let wy = baseY - 95 * SCALE; wy < baseY - 10 * SCALE; wy += 12 * SCALE) {
+        for (let wx = x + 13 * SCALE; wx < x + 38 * SCALE; wx += 10 * SCALE) {
+          ctx.fillRect(wx, wy, 6 * SCALE, 6 * SCALE);
+        }
+      }
+      ctx.globalAlpha = 0.12 * cityFade;
+
+      // 楼4（远右）
+      ctx.fillStyle = '#4a6a9a';
+      ctx.fillRect(x + 55 * SCALE, baseY - 140 * SCALE, 35 * SCALE, 140 * SCALE);
+
+      // 楼4窗户
+      ctx.fillStyle = '#88ccff';
+      ctx.globalAlpha = 0.08 * cityFade;
+      for (let wy = baseY - 130 * SCALE; wy < baseY - 10 * SCALE; wy += 12 * SCALE) {
+        for (let wx = x + 58 * SCALE; wx < x + 83 * SCALE; wx += 10 * SCALE) {
+          ctx.fillRect(wx, wy, 6 * SCALE, 6 * SCALE);
+        }
+      }
+      ctx.globalAlpha = 0.12 * cityFade;
+
+      // 楼间空隙显示深度
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+      ctx.lineWidth = 1 * SCALE;
+      ctx.beginPath();
+      ctx.moveTo(x - 50 * SCALE, baseY - 100 * SCALE);
+      ctx.lineTo(x - 50 * SCALE, baseY);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(x + 50 * SCALE, baseY - 120 * SCALE);
+      ctx.lineTo(x + 50 * SCALE, baseY);
+      ctx.stroke();
+
+    } else {
+      // 默认通用设计
+      ctx.fillStyle = city.glow;
+      ctx.fillRect(x - 25 * SCALE, baseY - 100 * SCALE, 50 * SCALE, 100 * SCALE);
+    }
+  }
+  ctx.restore();
+}
+
+function drawBg(city) {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, city.sky[0]);
+  g.addColorStop(1, city.sky[1]);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const horizon = H * 0.5;
+  const gg = ctx.createLinearGradient(0, horizon - 80 * SCALE, 0, horizon + 80 * SCALE);
+  gg.addColorStop(0, 'rgba(0,0,0,0)');
+  gg.addColorStop(0.5, city.glow);
+  gg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalAlpha = 0.25 * cityFade;
+  ctx.fillStyle = gg; ctx.fillRect(0, horizon - 80 * SCALE, W, 160 * SCALE);
+  ctx.globalAlpha = 1;
+  const rnd = seededRand(cityNameSeed(city.name));
+  const parallax = -camIsoX() * 0.15;
+  const baseY = horizon + 20 * SCALE;
+  let x = -200 + (parallax % 400);
+  ctx.save();
+  for (let i = 0; i < 25; i++) {
+    const bw = (30 + rnd() * 70) * SCALE;
+    const bh = (50 + rnd() * 220) * SCALE;
+    ctx.fillStyle = city.buildings[Math.floor(rnd() * city.buildings.length)];
+    ctx.globalAlpha = 0.85;
+    ctx.fillRect(x, baseY - bh, bw - 4 * SCALE, bh);
+    ctx.fillStyle = city.accent;
+    ctx.globalAlpha = 0.12;
+    for (let wy = baseY - bh + 8 * SCALE; wy < baseY - 6 * SCALE; wy += 14 * SCALE) {
+      for (let wx = x + 6 * SCALE; wx < x + bw - 10 * SCALE; wx += 12 * SCALE) {
+        if (rnd() > 0.55) ctx.fillRect(wx, wy, 5 * SCALE, 7 * SCALE);
+      }
+    }
+    x += bw + (4 + rnd() * 10) * SCALE;
+    if (x > W + 200) break;
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+  ctx.save();
+  ctx.globalAlpha = 0.10 * cityFade;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 ' + (110 * SCALE) + 'px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(city.name, W / 2, H * 0.22);
+  ctx.restore();
+  drawLandmarkSilhouettes(city);
+  const gs = ctx.createLinearGradient(0, H * 0.75, 0, H);
+  gs.addColorStop(0, 'rgba(0,0,0,0)');
+  gs.addColorStop(1, city.ground);
+  ctx.fillStyle = gs; ctx.fillRect(0, H * 0.75, W, H * 0.25);
+}
+
+function drawScene(city) {
+  const list = [];
+  for (const p of plats) list.push({ depth: p.col + p.row, kind: 'plat', p: p });
+  list.push({ depth: ch.col + ch.row + 0.01, kind: 'char' });
+  list.sort((a, b) => a.depth - b.depth);
+  const idx = indexOfChar();
+  const nextP = plats[idx + 1];
+  for (const item of list) {
+    if (item.kind === 'plat') {
+      const p = item.p;
+      const s = projectToScreen(p.col, p.row);
+      if (s.x < -TILE_W * 2 || s.x > W + TILE_W * 2 || s.y < -TILE_Z * 6 || s.y > H + TILE_Z * 3) continue;
+      const top = city.ground;
+      drawCube(ctx, s.x, s.y - TILE_H / 2, TILE_W, TILE_H, TILE_Z, top, shade(top, -28), shade(top, -52));
+      if (state === 'ready' && p === nextP) {
+        ctx.save();
+        ctx.globalAlpha = 0.45 + 0.25 * Math.sin(Date.now() / 250);
+        ctx.strokeStyle = city.accent; ctx.lineWidth = 3 * SCALE;
+        const sy = s.y - TILE_H / 2;
+        ctx.beginPath();
+        ctx.moveTo(s.x, sy);
+        ctx.lineTo(s.x + TILE_W/2, sy + TILE_H/2);
+        ctx.lineTo(s.x, sy + TILE_H);
+        ctx.lineTo(s.x - TILE_W/2, sy + TILE_H/2);
+        ctx.closePath(); ctx.stroke();
+        ctx.restore();
+      }
+    } else {
+      const s = projectToScreen(ch.col, ch.row);
+      let py = s.y - ch.jumpZ;
+      if (ch.dying) {
+        py += ch.dieZ;
+      }
+
+      // 绘制阴影
+      ctx.save();
+      ctx.globalAlpha = ch.dying ? 0 : 0.25;
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y - TILE_H / 2, TILE_W * 0.3, TILE_H * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // 绘制3D人物
+      let scaleX = 1, scaleY = 1;
+      if (state === 'charge') {
+        scaleX = ch.sqX;
+        scaleY = ch.sqY;
+      }
+      drawCharacter3D(s.x + (ch.dying ? ch.dieVX * ch.dieFall : 0), py, 0, scaleX, scaleY);
+    }
+  }
+  drawParts();
+  drawPopups();
+}
+
+function drawCharacter3D(sx, sy, sz, scaleX, scaleY) {
+  if (!charImg.complete) return;
+
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  // 应用isometric透视变换，给予3D感
+  const isoPerspective = 0.85;
+  ctx.transform(1, 0.25 * isoPerspective, 0.25 * isoPerspective, 0.95, 0, 0);
+
+  // 根据状态应用缩放
+  let finalScaleX = scaleX, finalScaleY = scaleY;
+
+  if (state === 'jumping') {
+    // 跳跃时轻微缩放变化
+    const jumpScale = 0.95 + ch.jumpT * 0.1;
+    finalScaleX *= jumpScale;
+    finalScaleY *= jumpScale;
+  }
+
+  ctx.scale(finalScaleX, finalScaleY);
+
+  // 获取图片尺寸
+  const imgW = charImg.width || 45 * SCALE;
+  const imgH = charImg.height || 45 * SCALE;
+
+  // 绘制原有图片人物，居中并从底部对齐
+  ctx.drawImage(charImg, -imgW / 2, -imgH, imgW, imgH);
+
+  // 根据状态添加特殊效果
+  if (state === 'charge') {
+    // 蓄力时添加光晕效果
+    ctx.globalAlpha = Math.min(chargeT * 0.3, 0.15);
+    ctx.fillStyle = '#ffff99';
+    ctx.beginPath();
+    ctx.arc(0, -imgH * 0.5, imgW * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (ch.dying) {
+    // 死亡时添加X效果
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = '#ff4444';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-imgW * 0.3, -imgH * 0.5);
+    ctx.lineTo(imgW * 0.3, -imgH * 0.2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(imgW * 0.3, -imgH * 0.5);
+    ctx.lineTo(-imgW * 0.3, -imgH * 0.2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function spawnCityTransitionPopup(cityName) {
+  nextCityPopup = { text: '到达 ' + cityName, life: 1.0 };
+}
+
+function drawCityTransitionPopup() {
+  if (nextCityPopup.life <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = nextCityPopup.life;
+  ctx.fillStyle = '#ffcc00';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '700 ' + (32 * SCALE) + 'px sans-serif';
+  ctx.fillText(nextCityPopup.text, W / 2, H * 0.25);
+  ctx.restore();
+}
+
+function drawUI(city) {
+  ctx.save();
+  ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+  ctx.fillStyle = '#fff';
+  ctx.font = '700 ' + (34 * SCALE) + 'px sans-serif';
+  ctx.fillText(String(score), W - 20, 18);
+  ctx.font = '600 ' + (16 * SCALE) + 'px sans-serif';
+  ctx.fillStyle = city.accent;
+  ctx.fillText(city.name + '  ·  最高 ' + best, W - 20, 18 + 40 * SCALE);
+  if (comboCount > 0) {
+    ctx.font = '700 ' + (18 * SCALE) + 'px sans-serif';
+    ctx.fillStyle = '#ffd700';
+    const nextGain = Math.pow(2, Math.min(comboCount + 1, 10));
+    ctx.fillText('连击 ×' + comboCount + '  下次 +' + nextGain, W - 20, 18 + 64 * SCALE);
+  }
+  ctx.restore();
+  if (state === 'charge') {
+    const bw = Math.min(W * 0.6, 320 * SCALE);
+    const bx = (W - bw) / 2, by = H - 110 * SCALE, bh = 12 * SCALE;
+    const nextDist = nextDistOf();
+    const tgt = (nextDist - 2) / 3;
+    const successHalf = 0.5 / 3;
+    const centerHalf  = 0.2 / 3;
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,.15)';
+    roundRect(bx, by, bw, bh, bh / 2); ctx.fill();
+    const szL = Math.max(0, tgt - successHalf);
+    const szR = Math.min(1, tgt + successHalf);
+    ctx.fillStyle = 'rgba(80,255,140,.35)';
+    ctx.fillRect(bx + bw * szL, by, bw * (szR - szL), bh);
+    const czL = Math.max(0, tgt - centerHalf);
+    const czR = Math.min(1, tgt + centerHalf);
+    ctx.fillStyle = 'rgba(255,215,0,.55)';
+    ctx.fillRect(bx + bw * czL, by, bw * (czR - czL), bh);
+    const delta = Math.abs(chargeT - tgt);
+    let fillColor;
+    if (delta <= centerHalf) fillColor = '#ffd700';
+    else if (delta <= successHalf) fillColor = '#5fffb0';
+    else fillColor = '#ff7a7a';
+    roundRect(bx, by, Math.max(bh, bw * chargeT), bh, bh / 2);
+    ctx.fillStyle = fillColor; ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2 * SCALE;
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(bx + bw * tgt, by - 3 * SCALE);
+    ctx.lineTo(bx + bw * tgt, by + bh + 3 * SCALE);
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (state === 'start') {
+    overlay();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+    ctx.font = '700 ' + (44 * SCALE) + 'px sans-serif';
+    ctx.fillText('跳一跳 · 城市之旅', W / 2, H * 0.40);
+    ctx.font = '500 ' + (20 * SCALE) + 'px sans-serif';
+    ctx.fillStyle = '#cde';
+    ctx.fillText('点击任意处开始', W / 2, H * 0.40 + 50 * SCALE);
+    ctx.fillText('按住蓄力 → 松手起跳', W / 2, H * 0.40 + 84 * SCALE);
+  }
+  if (state === 'dead') {
+    overlay();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+    ctx.font = '700 ' + (48 * SCALE) + 'px sans-serif';
+    ctx.fillText('GAME OVER', W / 2, H * 0.38);
+    ctx.font = '600 ' + (26 * SCALE) + 'px sans-serif';
+    ctx.fillText('得分 ' + score + '   最高 ' + best, W / 2, H * 0.38 + 50 * SCALE);
+    if (deadFrames > 55) {
+      ctx.font = '500 ' + (20 * SCALE) + 'px sans-serif';
+      ctx.fillStyle = '#cde';
+      ctx.fillText('点击重新开始', W / 2, H * 0.38 + 96 * SCALE);
+    }
+  }
+}
+function overlay() {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,.45)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+}
+function roundRect(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// ===================== PARTICLES =====================
+function spawnLandParts() {
+  const s = projectToScreen(ch.toCol, ch.toRow);
+  for (let i = 0; i < 16; i++) {
+    const a = Math.random() * Math.PI * 2, sp = (1 + Math.random() * 3) * SCALE;
+    parts.push({ x: s.x, y: s.y - TILE_H / 2, vx: Math.cos(a) * sp, vy: -Math.abs(Math.sin(a) * sp) - 1,
+      life: 1, color: cur().accent, size: (3 + Math.random() * 3) * SCALE });
+  }
+}
+function spawnDeathParts() {
+  const s = projectToScreen(ch.col, ch.row);
+  for (let i = 0; i < 26; i++) {
+    const a = Math.random() * Math.PI * 2, sp = (1 + Math.random() * 5) * SCALE;
+    parts.push({ x: s.x, y: s.y - 20 * SCALE, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 2,
+      life: 1, color: '#ff6a6a', size: (3 + Math.random() * 4) * SCALE });
+  }
+}
+function spawnScorePopup(gain) {
+  const s = projectToScreen(ch.toCol, ch.toRow);
+  popups.push({
+    x: s.x,
+    y: s.y - TILE_Z * 2,
+    vy: -1.8 * SCALE,
+    life: 1.0,
+    text: '+' + gain,
+    color: gain > 1 ? '#ffd700' : '#ffffff',
+  });
+}
+function updateParts() {
+  for (const p of parts) { p.x += p.vx; p.y += p.vy; p.vy += 0.18 * SCALE; p.life -= 0.025; }
+  parts = parts.filter(p => p.life > 0);
+}
+function drawParts() {
+  for (const p of parts) {
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+function updatePopups() {
+  for (const p of popups) { p.y += p.vy; p.life -= 0.022; }
+  popups = popups.filter(p => p.life > 0);
+}
+function drawPopups() {
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '700 ' + (22 * SCALE) + 'px sans-serif';
+  for (const p of popups) {
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.fillText(p.text, p.x, p.y);
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+// ===================== STORAGE =====================
+function loadBest() { try { return parseInt(localStorage.getItem('jump3d_best') || '0', 10) || 0; } catch (e) { return 0; } }
+function saveBest(v) { try { localStorage.setItem('jump3d_best', String(v)); } catch (e) {} }
+
+// ===================== SOUND =====================
+function playSound(type) {
+  try {
+    const audioCtx = window.audioCtx || (window.audioCtx = new (window.AudioContext || window.webkitAudioContext)());
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    if (type === 'jump') {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.setValueAtTime(300, now);
+      osc.frequency.exponentialRampToValueAtTime(500, now + 0.15);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } else if (type === 'perfect') {
+      const osc1 = audioCtx.createOscillator();
+      const osc2 = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc1.frequency.setValueAtTime(500, now);
+      osc2.frequency.setValueAtTime(750, now);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      osc1.start(now);
+      osc2.start(now);
+      osc1.stop(now + 0.3);
+      osc2.stop(now + 0.3);
+    } else if (type === 'land') {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.exponentialRampToValueAtTime(200, now + 0.12);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+      osc.start(now);
+      osc.stop(now + 0.12);
+    } else if (type === 'miss') {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.exponentialRampToValueAtTime(100, now + 0.4);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    }
+  } catch (e) {}
+}
+
+// ===================== MAIN LOOP =====================
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  const city = cur();
+  drawBg(city);
+  drawScene(city);
+  drawUI(city);
+  drawCityTransitionPopup();
+}
+function tick() {
+  update();
+  draw();
+  requestAnimationFrame(tick);
+}
+
+// ===================== INIT =====================
+resize();
+reset();
+tick();
+</script>
+</body>
+</html>

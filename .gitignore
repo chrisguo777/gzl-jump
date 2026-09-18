@@ -1,0 +1,11 @@
+# WeChat DevTools / build artifacts
+node_modules/
+miniprogram_npm/
+dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / local
+.idea/

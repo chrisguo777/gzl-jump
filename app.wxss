@@ -1,0 +1,5 @@
+page {
+  background: #0a0e14;
+  height: 100%;
+  overflow: hidden;
+}

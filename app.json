@@ -1,0 +1,11 @@
+{
+  "pages": ["pages/game/game"],
+  "window": {
+    "navigationBarTitleText": "GZL 闯关",
+    "navigationBarBackgroundColor": "#0a0e14",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#0a0e14"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}
