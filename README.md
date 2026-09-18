@@ -14,9 +14,9 @@
 | 玩法维度 | 3D 等距（isometric），可选方向跳跃 | 2D 横版，自动向右 |
 | 城市/关卡 | 12 座城市，各有地标剪影，随机地形 | 无城市概念，随机平台 |
 | 渲染 | Canvas 2D + 一个覆盖在上方的 `<img>` 角色 | Canvas 2D（角色也画在 canvas 内） |
-| 存档 | 无（或 localStorage，视代码而定） | `wx.setStorageSync('gzl_best')` |
+| 存档 | `localStorage`（键名 `jump3d_best`） | `wx.setStorageSync('gzl_best')` |
 | 运行方式 | 浏览器直接打开，或本地静态服务器 | 微信开发者工具打开项目根目录 |
-| 依赖 | 无（纯原生 JS） | 微信小程序基础库 3.4.3 |
+| 依赖 | 游戏本体无依赖；截图脚本需 Playwright | 微信小程序基础库 3.4.3 |
 
 **两个版本互不依赖**。改一个不会影响另一个。修改前务必先确认目标是哪一版。
 
@@ -25,16 +25,16 @@
 ## 2. 文件结构
 
 ```
-wechat_game/
+gzl-jump/
 ├── index.html            # 【网页版】3D 等距跳一跳，单文件自包含
 ├── images/gzl.png        # 角色贴图（网页版通过 <img src> 引用）
 ├── gzl.png               # 角色贴图副本（根目录，1.7MB，历史遗留）
-├── verify_landmarks.js   # Playwright 脚本：截图验证 12 城市地标渲染
+├── verify_landmarks.js   # Playwright 截图辅助脚本（非自动断言测试）
 │
 ├── app.js                # 【小程序】全局入口（几乎为空）
 ├── app.json              # 小程序全局配置，pages 只注册 pages/game/game
 ├── app.wxss              # 全局样式
-├── project.config.json   # 微信开发者工具项目配置（appid 为测试号）
+├── project.config.json   # 微信开发者工具配置（appid 当前为占位值）
 ├── sitemap.json          # 小程序 sitemap
 ├── pages/game/
 │   ├── game.js           # 【小程序核心逻辑】Page({}) 全部游戏代码
@@ -42,7 +42,7 @@ wechat_game/
 │   ├── game.wxss         # 全屏 canvas 样式
 │   └── game.json         # 页面配置
 │
-└── Todolist              # 手写待办：方向控制自动化 / 音效 / 彩蛋
+└── Todolist              # 早期手写待办，部分内容已经过时
 ```
 
 > 注：根目录 `gzl.png` 与 `images/gzl.png` 内容相同。网页版引用的是 `images/gzl.png`（见 `index.html` 中 `<img id="char-img" src="images/gzl.png">`）。
@@ -73,8 +73,15 @@ wechat_game/
 - 角色不是画在 canvas 里的，而是独立的 `#char-el`（`<img>`）用 CSS `transform` 定位在 canvas 之上（`mix-blend-mode:screen`）。改角色位置/动画要操作这个 DOM，不是 canvas。
 
 ### 3.4 验证脚本
-- [`verify_landmarks.js`](verify_landmarks.js)：用 Playwright 打开 `http://localhost:8888/index.html`，点击开始、模拟 15 次跳跃、截图，检查 12 城市地标是否渲染。
-- 运行前需先起静态服务器（见第 5 节）并 `npm i playwright`。
+- [`verify_landmarks.js`](verify_landmarks.js) 使用 Playwright 打开 `http://localhost:8888/index.html`，启动游戏并生成初始画面与推进画面截图。
+- 该脚本目前只是**人工视觉检查辅助工具**：没有逐一进入 12 座城市，也没有像素对比或断言；脚本最后打印成功并不等于所有地标都已被自动验证。
+- 当前“模拟 15 次跳跃”的实现使用普通 `click()` 加等待，并不能准确模拟按住蓄力再松开的操作。若把它升级为回归测试，需要改用明确的 `mouse.down()` / `mouse.up()` 或提供测试专用状态接口。
+- 运行前需先启动静态服务器（见第 5 节），并安装 Playwright 及 Chromium：`npm i -D playwright && npx playwright install chromium`。
+
+### 3.5 已实现功能
+- 最高分会写入浏览器 `localStorage`，键名为 `jump3d_best`。
+- 已使用 Web Audio API 实现 `jump`、`land`、`perfect`、`miss` 四类合成音效。
+- 城市按分数推进，`Math.floor(score / 100) % CITIES.length` 决定当前城市。
 
 ---
 
@@ -128,7 +135,7 @@ npx serve -l 8888
 ### 小程序版
 1. 安装「微信开发者工具」。
 2. 用它「导入项目」，选择本仓库**根目录**。
-3. `appid` 为测试号 `wx0000000000000000`（见 `project.config.json`），可直接预览；如需真机/发布需替换为自己的 AppID。
+3. `project.config.json` 中的 `appid` 当前是占位值 `wx0000000000000000`。请在微信开发者工具中选择适用的测试方式，或替换为自己的有效 AppID；真机预览和发布需要有效配置。
 
 ---
 
@@ -138,8 +145,8 @@ npx serve -l 8888
 - **网页版是单文件**：JS 内联在 `index.html`，无构建步骤，改完刷新即可。别去找不存在的 `src/` 或打包配置。
 - **角色渲染差异**：网页版角色是 DOM `<img>`（`#char-el`），小程序版角色画在 canvas 里。别混。
 - **确定性生成**：网页版城市用 seed 生成，改地形/建筑逻辑要保持同 seed 结果稳定，否则 `verify_landmarks.js` 的预期会变。
-- **无测试框架**：目前唯一的自动化验证是 `verify_landmarks.js`（Playwright 截图），不是断言测试。
-- **待办**（见 `Todolist`）：① 方向控制自动化 ② 音效 ③ 彩蛋 —— 均未实现。
+- **无测试框架**：目前只有 `verify_landmarks.js` 生成截图供人工检查，它不构成完整的自动化验证。
+- **待办文件已过时**：`Todolist` 仍列有“音效”，但网页版音效已经实现。现阶段可确认的后续方向是：① 自动方向控制 ② 小程序版音效或两版音效统一 ③ 彩蛋 ④ 把截图脚本升级成真正的回归测试。
 
 ---
 
