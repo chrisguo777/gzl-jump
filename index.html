@@ -1372,12 +1372,18 @@ function initCharacter3D() {
   }
 
   const T = window.THREE;
-  renderer3D = new T.WebGLRenderer({
-    canvas: character3DCanvas,
-    alpha: true,
-    antialias: true,
-    powerPreference: 'high-performance',
-  });
+  try {
+    renderer3D = new T.WebGLRenderer({
+      canvas: character3DCanvas,
+      alpha: true,
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
+  } catch (error) {
+    renderer3D = null;
+    character3DCanvas.style.display = 'none';
+    return;
+  }
   renderer3D.setClearColor(0x000000, 0);
   if ('outputColorSpace' in renderer3D && T.SRGBColorSpace) {
     renderer3D.outputColorSpace = T.SRGBColorSpace;
