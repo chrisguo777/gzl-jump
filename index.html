@@ -386,6 +386,146 @@ function update() {
 // ===================== DRAW =====================
 function cur() { return CITIES[cityIndex]; }
 
+// Recognizable skyline compositions based on each city's real landmarks.
+// These are drawn locally (no hot-linked photos), so the game remains offline-ready.
+function drawAuthenticSkyline(city) {
+  ctx.save();
+  ctx.globalAlpha = 0.82 * cityFade;
+  const baseY = H * 0.54;
+  const cx = W / 2 - camIsoX() * 0.035;
+  const s = SCALE;
+
+  function building(x, w, h, color, roof) {
+    const left = cx + x * s, top = baseY - h * s;
+    ctx.fillStyle = color;
+    ctx.fillRect(left, top, w * s, h * s);
+    if (roof === 'spire') {
+      ctx.beginPath();
+      ctx.moveTo(left, top); ctx.lineTo(left + w * s / 2, top - 30 * s); ctx.lineTo(left + w * s, top);
+      ctx.closePath(); ctx.fill();
+    } else if (roof === 'step') {
+      ctx.fillRect(left + 5 * s, top - 12 * s, (w - 10) * s, 12 * s);
+      ctx.fillRect(left + 10 * s, top - 23 * s, (w - 20) * s, 11 * s);
+    } else if (roof === 'slant') {
+      ctx.beginPath(); ctx.moveTo(left, top); ctx.lineTo(left + w * s, top - 18 * s);
+      ctx.lineTo(left + w * s, top); ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = city.accent;
+    ctx.globalAlpha = 0.16 * cityFade;
+    const cols = Math.max(1, Math.floor(w / 10));
+    for (let yy = top + 10 * s; yy < baseY - 6 * s; yy += 14 * s) {
+      for (let j = 0; j < cols; j++) if ((j + Math.floor(yy / (14 * s))) % 3 !== 0) {
+        ctx.fillRect(left + (5 + j * 10) * s, yy, 3 * s, 5 * s);
+      }
+    }
+    ctx.globalAlpha = 0.82 * cityFade;
+  }
+  function mountain(x, w, h, color, snow) {
+    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(cx + x * s, baseY);
+    ctx.lineTo(cx + (x + w * 0.5) * s, baseY - h * s); ctx.lineTo(cx + (x + w) * s, baseY);
+    ctx.closePath(); ctx.fill();
+    if (snow) {
+      ctx.fillStyle = 'rgba(245,250,255,0.7)'; ctx.beginPath();
+      ctx.moveTo(cx + (x + w * 0.38) * s, baseY - h * 0.76 * s);
+      ctx.lineTo(cx + (x + w * 0.5) * s, baseY - h * s);
+      ctx.lineTo(cx + (x + w * 0.63) * s, baseY - h * 0.74 * s);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  function tower(x, bodyH, color, deckW) {
+    const px = cx + x * s;
+    ctx.fillStyle = color; ctx.fillRect(px - 4 * s, baseY - bodyH * s, 8 * s, bodyH * s);
+    ctx.beginPath(); ctx.ellipse(px, baseY - bodyH * 0.66 * s, deckW * s, 10 * s, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 3 * s; ctx.beginPath();
+    ctx.moveTo(px, baseY - bodyH * s); ctx.lineTo(px, baseY - (bodyH + 38) * s); ctx.stroke();
+  }
+  function pearlTower(x) {
+    const px = cx + x * s;
+    ctx.strokeStyle = '#e76aa6'; ctx.lineWidth = 6 * s; ctx.beginPath();
+    ctx.moveTo(px, baseY); ctx.lineTo(px, baseY - 190 * s); ctx.stroke();
+    ctx.fillStyle = '#ff87bd';
+    ctx.beginPath(); ctx.arc(px, baseY - 78 * s, 18 * s, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(px, baseY - 145 * s, 13 * s, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#ffd1e6'; ctx.lineWidth = 2 * s; ctx.beginPath();
+    ctx.moveTo(px, baseY - 190 * s); ctx.lineTo(px, baseY - 224 * s); ctx.stroke();
+  }
+  function cantonTower(x) {
+    const px = cx + x * s;
+    ctx.strokeStyle = '#ff6699'; ctx.lineWidth = 3 * s;
+    ctx.beginPath(); ctx.moveTo(px - 18 * s, baseY); ctx.bezierCurveTo(px + 5 * s, baseY - 80 * s, px - 5 * s, baseY - 150 * s, px - 10 * s, baseY - 205 * s); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px + 18 * s, baseY); ctx.bezierCurveTo(px - 5 * s, baseY - 80 * s, px + 5 * s, baseY - 150 * s, px + 10 * s, baseY - 205 * s); ctx.stroke();
+    ctx.lineWidth = 1 * s;
+    for (let y = 0; y < 190; y += 16) { ctx.beginPath(); ctx.moveTo(px - (18 - y * 0.04) * s, baseY - y * s); ctx.lineTo(px + (18 - y * 0.04) * s, baseY - (y + 14) * s); ctx.stroke(); }
+    ctx.lineWidth = 2 * s; ctx.beginPath(); ctx.moveTo(px, baseY - 205 * s); ctx.lineTo(px, baseY - 245 * s); ctx.stroke();
+  }
+  function baseline() {
+    ctx.fillStyle = 'rgba(5,10,16,0.72)';
+    ctx.fillRect(0, baseY, W, 34 * s);
+  }
+
+  if (city.name === '宜昌') {
+    mountain(-W / s * 0.58, W / s * 0.45, 145, '#31566b');
+    mountain(-90, 290, 175, '#426d7d');
+    ctx.fillStyle = '#929ba0'; ctx.fillRect(cx - 180 * s, baseY - 52 * s, 360 * s, 52 * s);
+    ctx.fillStyle = '#26343a'; for (let i = 0; i < 12; i++) ctx.fillRect(cx + (-165 + i * 29) * s, baseY - 45 * s, 11 * s, 38 * s);
+    ctx.fillStyle = 'rgba(210,245,255,0.76)'; for (let i = 0; i < 11; i++) ctx.fillRect(cx + (-154 + i * 29) * s, baseY - 8 * s, 15 * s, 28 * s);
+  } else if (city.name === '六盘水') {
+    mountain(-W / s * 0.58, 280, 190, '#453e51'); mountain(-120, 260, 225, '#564b61'); mountain(70, 300, 180, '#403947');
+    building(-145, 30, 70, '#343844'); building(-105, 46, 92, '#3d424d'); building(-50, 38, 64, '#353b45'); building(0, 58, 110, '#424854'); building(70, 42, 76, '#363c47');
+    ctx.fillStyle = '#242832'; for (const x of [-128,-70,88]) ctx.fillRect(cx + x * s, baseY - 125 * s, 8 * s, 80 * s);
+  } else if (city.name === '淄博') {
+    building(-170, 48, 86, '#67372d','step'); building(-110, 62, 112, '#7a4032'); building(-34, 70, 142, '#884632','step'); building(52, 55, 98, '#703a2e'); building(120, 42, 76, '#60342c');
+    ctx.strokeStyle = '#ff8a3a'; ctx.lineWidth = 7 * s; ctx.beginPath(); ctx.arc(cx + 15 * s, baseY - 28 * s, 70 * s, Math.PI, 0); ctx.stroke();
+    ctx.fillStyle = '#3d2722'; ctx.fillRect(cx - 58 * s, baseY - 29 * s, 146 * s, 29 * s);
+  } else if (city.name === '深圳') {
+    building(-190, 44, 105, '#123d63'); building(-134, 48, 148, '#175078','slant');
+    building(-70, 48, 205, '#195b77','slant'); building(-2, 50, 270, '#12627e','spire');
+    building(68, 48, 182, '#174d72','step'); building(130, 52, 126, '#123a60');
+  } else if (city.name === '广州') {
+    building(-205, 50, 114, '#554f54'); building(-140, 50, 176, '#62535b','slant');
+    cantonTower(-35); building(42, 54, 230, '#6b5660','slant'); building(112, 52, 196, '#594d5b'); building(178, 42, 105, '#4a4652');
+  } else if (city.name === '重庆') {
+    mountain(-W / s * 0.56, 330, 150, '#241c32'); mountain(-70, 380, 190, '#31203d');
+    building(-170, 42, 90, '#55244f'); building(-115, 45, 122, '#62295a');
+    for (let i = 0; i < 4; i++) building(-40 + i * 42, 30, 185 + (i % 2) * 22, '#6c2f62');
+    ctx.fillStyle = '#9b4b89'; ctx.fillRect(cx - 48 * s, baseY - 202 * s, 158 * s, 13 * s);
+    ctx.strokeStyle = '#d04aa3'; ctx.lineWidth = 3 * s; ctx.beginPath(); ctx.moveTo(cx - 240 * s, baseY - 45 * s); ctx.lineTo(cx + 240 * s, baseY - 82 * s); ctx.stroke();
+  } else if (city.name === '北京') {
+    building(-210, 52, 92, '#572b2b'); building(-145, 58, 125, '#673131');
+    building(-65, 62, 245, '#743737');
+    ctx.fillStyle = '#743737'; ctx.beginPath(); ctx.moveTo(cx - 65 * s, baseY - 245 * s); ctx.quadraticCurveTo(cx - 34 * s, baseY - 270 * s, cx - 3 * s, baseY - 245 * s); ctx.fill();
+    ctx.strokeStyle = '#8e4545'; ctx.lineWidth = 15 * s; ctx.beginPath(); ctx.moveTo(cx + 45 * s, baseY - 155 * s); ctx.lineTo(cx + 100 * s, baseY - 215 * s); ctx.lineTo(cx + 150 * s, baseY - 215 * s); ctx.lineTo(cx + 105 * s, baseY - 145 * s); ctx.stroke();
+    building(165, 46, 105, '#592d2d');
+  } else if (city.name === '上海') {
+    building(-220, 48, 105, '#294b70'); pearlTower(-125);
+    building(-62, 52, 205, '#355a80','step'); building(6, 58, 270, '#416a8c','slant');
+    ctx.fillStyle = '#416a8c'; ctx.beginPath(); ctx.moveTo(cx + 80 * s, baseY); ctx.lineTo(cx + 103 * s, baseY - 290 * s); ctx.quadraticCurveTo(cx + 145 * s, baseY - 210 * s, cx + 148 * s, baseY); ctx.closePath(); ctx.fill();
+    building(165, 48, 132, '#2c4e72');
+  } else if (city.name === '首尔') {
+    mountain(-155, 230, 95, '#3a2950'); tower(-80, 158, '#c8579a', 25);
+    building(-5, 46, 118, '#563667');
+    ctx.fillStyle = '#75406f'; ctx.beginPath(); ctx.moveTo(cx + 72 * s, baseY); ctx.lineTo(cx + 90 * s, baseY - 278 * s); ctx.lineTo(cx + 108 * s, baseY); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#ff91cb'; ctx.lineWidth = 2 * s; ctx.beginPath(); ctx.moveTo(cx + 90 * s, baseY - 278 * s); ctx.lineTo(cx + 90 * s, baseY - 310 * s); ctx.stroke();
+    building(130, 50, 112, '#4d315e'); building(193, 38, 80, '#432b54');
+  } else if (city.name === '西雅图') {
+    mountain(-25, 290, 210, '#7b8fa2', true);
+    building(-210, 45, 105, '#364755'); building(-152, 48, 198, '#2f4354','step');
+    tower(-55, 172, '#b9c5cb', 36); building(15, 54, 140, '#3f5260'); building(82, 52, 114, '#374a58'); building(148, 46, 92, '#324451');
+  } else if (city.name === '洛杉矶') {
+    mountain(-W / s * 0.55, 360, 120, '#6c4935');
+    ctx.fillStyle = 'rgba(255,255,245,0.78)'; ctx.font = `700 ${18 * s}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('HOLLYWOOD', cx - 150 * s, baseY - 73 * s);
+    building(-70, 58, 185, '#5d3e35','step'); building(5, 58, 222, '#714638','spire'); building(82, 48, 150, '#5f3d35'); building(145, 52, 112, '#50372f');
+  } else if (city.name === '亚特兰大') {
+    building(-205, 52, 115, '#2b405c'); building(-140, 55, 158, '#334c6a');
+    building(-68, 62, 255, '#243e5c','spire');
+    ctx.fillStyle = '#d69c55'; ctx.fillRect(cx - 48 * s, baseY - 283 * s, 22 * s, 28 * s);
+    building(18, 58, 178, '#35516f','step'); building(92, 54, 138, '#2d4966');
+    ctx.fillStyle = '#385976'; ctx.beginPath(); ctx.ellipse(cx + 174 * s, baseY - 85 * s, 28 * s, 85 * s, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  baseline();
+  ctx.restore();
+}
+
 function drawLandmarkSilhouettes(city) {
   ctx.save();
   ctx.globalAlpha = 0.14 * cityFade;
@@ -1120,29 +1260,7 @@ function drawBg(city) {
   ctx.globalAlpha = 0.25 * cityFade;
   ctx.fillStyle = gg; ctx.fillRect(0, horizon - 80 * SCALE, W, 160 * SCALE);
   ctx.globalAlpha = 1;
-  const rnd = seededRand(cityNameSeed(city.name));
-  const parallax = -camIsoX() * 0.15;
-  const baseY = horizon + 20 * SCALE;
-  let x = -200 + (parallax % 400);
-  ctx.save();
-  for (let i = 0; i < 25; i++) {
-    const bw = (30 + rnd() * 70) * SCALE;
-    const bh = (50 + rnd() * 220) * SCALE;
-    ctx.fillStyle = city.buildings[Math.floor(rnd() * city.buildings.length)];
-    ctx.globalAlpha = 0.85;
-    ctx.fillRect(x, baseY - bh, bw - 4 * SCALE, bh);
-    ctx.fillStyle = city.accent;
-    ctx.globalAlpha = 0.12;
-    for (let wy = baseY - bh + 8 * SCALE; wy < baseY - 6 * SCALE; wy += 14 * SCALE) {
-      for (let wx = x + 6 * SCALE; wx < x + bw - 10 * SCALE; wx += 12 * SCALE) {
-        if (rnd() > 0.55) ctx.fillRect(wx, wy, 5 * SCALE, 7 * SCALE);
-      }
-    }
-    x += bw + (4 + rnd() * 10) * SCALE;
-    if (x > W + 200) break;
-  }
-  ctx.restore();
-  ctx.globalAlpha = 1;
+  drawAuthenticSkyline(city);
   ctx.save();
   ctx.globalAlpha = 0.10 * cityFade;
   ctx.fillStyle = '#ffffff';
@@ -1150,7 +1268,6 @@ function drawBg(city) {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(city.name, W / 2, H * 0.22);
   ctx.restore();
-  drawLandmarkSilhouettes(city);
   const gs = ctx.createLinearGradient(0, H * 0.75, 0, H);
   gs.addColorStop(0, 'rgba(0,0,0,0)');
   gs.addColorStop(1, city.ground);
