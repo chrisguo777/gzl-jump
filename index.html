@@ -9,17 +9,24 @@
   html, body { width:100%; height:100%; overflow:hidden; background:#000;
     font-family:"PingFang SC","Microsoft YaHei",sans-serif; -webkit-tap-highlight-color:transparent;
     user-select:none; -webkit-user-select:none; touch-action:none; }
-  #c { position:fixed; left:0; top:0; display:block; }
+  #c { position:fixed; left:0; top:0; display:block; z-index:0; }
+  #character-3d {
+    position:fixed; left:0; top:0; width:100%; height:100%;
+    display:block; pointer-events:none; z-index:2;
+  }
   #char-el {
     position:fixed; left:0; top:0; pointer-events:none; z-index:5;
     transform-origin:50% 100%; mix-blend-mode:screen; will-change:transform;
+    display:none;
   }
   #char-img { width:22.5px; height:auto; display:block; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<canvas id="character-3d" aria-hidden="true"></canvas>
 <div id="char-el"><img id="char-img" src="images/gzl.png" alt=""></div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.167.1/build/three.min.js"></script>
 <script>
 "use strict";
 
@@ -52,6 +59,12 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const charEl = document.getElementById('char-el');
 const charImg = document.getElementById('char-img');
+const character3DCanvas = document.getElementById('character-3d');
+
+let renderer3D = null, scene3D = null, camera3D = null;
+let characterRoot3D = null, flipPivot3D = null, modelGroup3D = null;
+let characterRig3D = null, character3DReady = false;
+const characterPose3D = { visible:false, sx:0, sy:0, scaleX:1, scaleY:1 };
 
 let W = 0, H = 0, DPR = 1, SCALE = 1;
 let TILE_W = BASE_TILE_W, TILE_H = BASE_TILE_H, TILE_Z = BASE_TILE_Z;
@@ -70,6 +83,15 @@ function resize() {
   TILE_H = BASE_TILE_H * SCALE;
   TILE_Z = BASE_TILE_Z * SCALE;
   charImg.style.width = (22.5 * SCALE) + 'px';
+  if (renderer3D && camera3D) {
+    renderer3D.setPixelRatio(DPR);
+    renderer3D.setSize(W, H, false);
+    camera3D.left = -W / 2;
+    camera3D.right = W / 2;
+    camera3D.top = H / 2;
+    camera3D.bottom = -H / 2;
+    camera3D.updateProjectionMatrix();
+  }
 }
 window.addEventListener('resize', resize);
 
@@ -1343,68 +1365,203 @@ function drawScene(city) {
   drawPopups();
 }
 
-function drawCharacter3D(sx, sy, sz, scaleX, scaleY) {
-  if (!charImg.complete) return;
+function initCharacter3D() {
+  if (!window.THREE) {
+    character3DCanvas.style.display = 'none';
+    return;
+  }
 
-  const imgW = charImg.width || 45 * SCALE;
-  const imgH = charImg.height || 45 * SCALE;
-  let finalScaleX = scaleX, finalScaleY = scaleY;
+  const T = window.THREE;
+  renderer3D = new T.WebGLRenderer({
+    canvas: character3DCanvas,
+    alpha: true,
+    antialias: true,
+    powerPreference: 'high-performance',
+  });
+  renderer3D.setClearColor(0x000000, 0);
+  if ('outputColorSpace' in renderer3D && T.SRGBColorSpace) {
+    renderer3D.outputColorSpace = T.SRGBColorSpace;
+  }
+
+  scene3D = new T.Scene();
+  camera3D = new T.OrthographicCamera(-W / 2, W / 2, H / 2, -H / 2, 0.1, 2000);
+  camera3D.position.set(0, 0, 1000);
+  camera3D.lookAt(0, 0, 0);
+
+  scene3D.add(new T.HemisphereLight(0xd9efff, 0x273044, 2.1));
+  const keyLight = new T.DirectionalLight(0xffffff, 2.6);
+  keyLight.position.set(-120, 180, 260);
+  scene3D.add(keyLight);
+  const rimLight = new T.DirectionalLight(0x66ccff, 1.5);
+  rimLight.position.set(160, 80, -120);
+  scene3D.add(rimLight);
+
+  characterRoot3D = new T.Group();
+  flipPivot3D = new T.Group();
+  modelGroup3D = new T.Group();
+  characterRoot3D.add(flipPivot3D);
+  flipPivot3D.position.y = 26;
+  flipPivot3D.add(modelGroup3D);
+  modelGroup3D.position.y = -26;
+  scene3D.add(characterRoot3D);
+
+  const skin = new T.MeshStandardMaterial({ color:0xf2b58f, roughness:0.78 });
+  const hair = new T.MeshStandardMaterial({ color:0x1d2028, roughness:0.9 });
+  const jacket = new T.MeshStandardMaterial({ color:0xf04f4f, roughness:0.62 });
+  const jacketDark = new T.MeshStandardMaterial({ color:0xa92536, roughness:0.72 });
+  const trousers = new T.MeshStandardMaterial({ color:0x243653, roughness:0.8 });
+  const shoes = new T.MeshStandardMaterial({ color:0xf4f7fb, roughness:0.5 });
+  const eye = new T.MeshStandardMaterial({ color:0x111827, roughness:0.4 });
+  const accent = new T.MeshStandardMaterial({
+    color:0xffd54a, emissive:0x4a2b00, emissiveIntensity:0.28, roughness:0.45,
+  });
+
+  function addMesh(geometry, material, parent, x, y, z) {
+    const mesh = new T.Mesh(geometry, material);
+    mesh.position.set(x || 0, y || 0, z || 0);
+    parent.add(mesh);
+    return mesh;
+  }
+
+  // 躯干、头部与面部
+  addMesh(new T.BoxGeometry(13, 16, 7), jacket, modelGroup3D, 0, 33, 0);
+  addMesh(new T.BoxGeometry(11, 5, 6.5), jacketDark, modelGroup3D, 0, 22.5, 0);
+  addMesh(new T.SphereGeometry(6.2, 16, 12), skin, modelGroup3D, 0, 47, 0);
+  const hairCap = addMesh(new T.SphereGeometry(6.35, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), hair, modelGroup3D, 0, 48.4, 0);
+  hairCap.rotation.x = -0.06;
+  addMesh(new T.SphereGeometry(0.7, 8, 6), eye, modelGroup3D, -2.1, 48, 5.45);
+  addMesh(new T.SphereGeometry(0.7, 8, 6), eye, modelGroup3D, 2.1, 48, 5.45);
+  addMesh(new T.BoxGeometry(5.5, 1.5, 0.8), accent, modelGroup3D, 0, 38.5, 3.9);
+
+  function makeArm(side) {
+    const shoulder = new T.Group();
+    shoulder.position.set(side * 8.2, 39, 0);
+    modelGroup3D.add(shoulder);
+    addMesh(new T.CylinderGeometry(2, 2.3, 12, 8), jacket, shoulder, 0, -6, 0);
+    addMesh(new T.SphereGeometry(2.25, 10, 8), skin, shoulder, 0, -13, 0);
+    shoulder.rotation.z = side * -0.12;
+    return shoulder;
+  }
+
+  function makeLeg(side) {
+    const hip = new T.Group();
+    hip.position.set(side * 3.4, 21, 0);
+    modelGroup3D.add(hip);
+    addMesh(new T.CylinderGeometry(2.35, 2.65, 14, 8), trousers, hip, 0, -7, 0);
+    const shoe = addMesh(new T.BoxGeometry(5.3, 3.3, 8.5), shoes, hip, 0, -15, 1.8);
+    shoe.rotation.x = -0.08;
+    return hip;
+  }
+
+  characterRig3D = {
+    leftArm: makeArm(-1),
+    rightArm: makeArm(1),
+    leftLeg: makeLeg(-1),
+    rightLeg: makeLeg(1),
+  };
+
+  characterRoot3D.visible = false;
+  character3DReady = true;
+}
+
+function renderCharacter3D() {
+  if (!character3DReady || !renderer3D) return;
+
+  characterRoot3D.visible = characterPose3D.visible;
+  character3DCanvas.style.opacity = (state === 'start' || state === 'dead') ? '0.48' : '1';
+
+  if (characterPose3D.visible) {
+    characterRoot3D.position.set(
+      characterPose3D.sx - W / 2,
+      H / 2 - characterPose3D.sy,
+      0
+    );
+    characterRoot3D.scale.set(
+      SCALE * characterPose3D.scaleX,
+      SCALE * characterPose3D.scaleY,
+      SCALE
+    );
+
+    flipPivot3D.quaternion.identity();
+    modelGroup3D.rotation.y = 0;
+    characterRig3D.leftArm.rotation.x = 0;
+    characterRig3D.rightArm.rotation.x = 0;
+    characterRig3D.leftLeg.rotation.x = 0;
+    characterRig3D.rightLeg.rotation.x = 0;
+
+    if (state === 'jumping') {
+      const t = Math.max(0, Math.min(1, ch.jumpT));
+      const flipProgress = t * t * (3 - 2 * t);
+      const dx = isoX(ch.toCol - ch.fromCol, ch.toRow - ch.fromRow);
+      const dy = -isoY(ch.toCol - ch.fromCol, ch.toRow - ch.fromRow);
+      const axis = new THREE.Vector3(dy, -dx, 0);
+      if (axis.lengthSq() < 0.0001) axis.set(1, 0, 0);
+      axis.normalize();
+      flipPivot3D.setRotationFromAxisAngle(axis, Math.PI * 2 * flipProgress);
+
+      const heading = Math.atan2(dx, Math.max(1, Math.abs(dy)));
+      modelGroup3D.rotation.y = Math.max(-0.5, Math.min(0.5, heading * 0.45));
+
+      // 翻转中段收紧四肢，让动作更像主动前空翻
+      const tuck = Math.sin(Math.PI * t);
+      characterRig3D.leftArm.rotation.x = -1.05 * tuck;
+      characterRig3D.rightArm.rotation.x = -1.05 * tuck;
+      characterRig3D.leftLeg.rotation.x = 1.15 * tuck;
+      characterRig3D.rightLeg.rotation.x = 1.15 * tuck;
+    } else if (ch.dying) {
+      flipPivot3D.rotation.z = Math.min(1.5, ch.dieFall * 0.035);
+      modelGroup3D.rotation.y = Math.sin(ch.dieFall * 0.08) * 0.55;
+    }
+  }
+
+  renderer3D.render(scene3D, camera3D);
+}
+
+function drawCharacter2DFallback(sx, sy, scaleX, scaleY) {
+  if (!charImg.complete) return;
+  const imgW = charImg.naturalWidth ? 22.5 * SCALE : (charImg.width || 45 * SCALE);
+  const ratio = charImg.naturalWidth ? charImg.naturalHeight / charImg.naturalWidth : 2;
+  const imgH = imgW * ratio;
   let flipAngle = 0;
 
   if (state === 'jumping') {
     const t = Math.max(0, Math.min(1, ch.jumpT));
-    // smoothstep 让起跳和落地阶段更稳，中段翻转更利落
     const flipProgress = t * t * (3 - 2 * t);
     const screenTravelX = isoX(ch.toCol - ch.fromCol, ch.toRow - ch.fromRow);
-    const flipDirection = screenTravelX >= 0 ? 1 : -1;
-    flipAngle = flipDirection * Math.PI * 2 * flipProgress;
+    flipAngle = (screenTravelX >= 0 ? 1 : -1) * Math.PI * 2 * flipProgress;
+  }
 
-    // 空中收身，落地前重新伸展
+  ctx.save();
+  ctx.translate(sx, sy - imgH * 0.5);
+  ctx.rotate(flipAngle);
+  ctx.scale(scaleX, scaleY);
+  ctx.drawImage(charImg, -imgW / 2, -imgH / 2, imgW, imgH);
+  ctx.restore();
+}
+
+function drawCharacter3D(sx, sy, sz, scaleX, scaleY) {
+  let finalScaleX = scaleX, finalScaleY = scaleY;
+
+  if (state === 'jumping') {
+    const t = Math.max(0, Math.min(1, ch.jumpT));
     const tuck = Math.sin(Math.PI * t);
-    finalScaleX *= 1 + tuck * 0.10;
-    finalScaleY *= 1 - tuck * 0.12;
+    finalScaleX *= 1 + tuck * 0.05;
+    finalScaleY *= 1 - tuck * 0.08;
   } else if (ch.landImpact > 0) {
-    // 落地短暂压缩，随后快速恢复
     finalScaleX *= 1 + ch.landImpact * 0.16;
     finalScaleY *= 1 - ch.landImpact * 0.16;
   }
 
-  ctx.save();
-  ctx.translate(sx, sy);
-
-  // 应用 isometric 透视变换，保持角色与场景方向一致
-  const isoPerspective = 0.85;
-  ctx.transform(1, 0.25 * isoPerspective, 0.25 * isoPerspective, 0.95, 0, 0);
-
-  // 将旋转中心移到身体中央，完成一整周前空翻
-  ctx.translate(0, -imgH * 0.5);
-  if (state === 'jumping') ctx.rotate(flipAngle);
-  ctx.scale(finalScaleX, finalScaleY);
-
-  // 图片围绕身体中心绘制，避免以前脚底为轴产生“甩圈”感
-  ctx.drawImage(charImg, -imgW / 2, -imgH / 2, imgW, imgH);
-
-  if (state === 'charge') {
-    ctx.globalAlpha = Math.min(chargeT * 0.3, 0.15);
-    ctx.fillStyle = '#ffff99';
-    ctx.beginPath();
-    ctx.arc(0, 0, imgW * 0.6, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (ch.dying) {
-    ctx.globalAlpha = 0.6;
-    ctx.strokeStyle = '#ff4444';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(-imgW * 0.3, -imgH * 0.2);
-    ctx.lineTo(imgW * 0.3, imgH * 0.2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(imgW * 0.3, -imgH * 0.2);
-    ctx.lineTo(-imgW * 0.3, imgH * 0.2);
-    ctx.stroke();
+  if (!character3DReady) {
+    drawCharacter2DFallback(sx, sy, finalScaleX, finalScaleY);
+    return;
   }
 
-  ctx.restore();
+  characterPose3D.visible = true;
+  characterPose3D.sx = sx;
+  characterPose3D.sy = sy;
+  characterPose3D.scaleX = finalScaleX;
+  characterPose3D.scaleY = finalScaleY;
 }
 
 function spawnCityTransitionPopup(cityName) {
@@ -1638,12 +1795,14 @@ function playSound(type) {
 
 // ===================== MAIN LOOP =====================
 function draw() {
+  characterPose3D.visible = false;
   ctx.clearRect(0, 0, W, H);
   const city = cur();
   drawBg(city);
   drawScene(city);
   drawUI(city);
   drawCityTransitionPopup();
+  renderCharacter3D();
 }
 function tick() {
   update();
@@ -1652,6 +1811,7 @@ function tick() {
 }
 
 // ===================== INIT =====================
+initCharacter3D();
 resize();
 reset();
 tick();
