@@ -54,6 +54,7 @@ const DIR = {
 
 const BASE_TILE_W = 96, BASE_TILE_H = 48, BASE_TILE_Z = 40;
 const WORLD_ZOOM = 1.45;
+const CHARACTER_MODEL_HEIGHT = 58;
 
 // ===================== CANVAS / SIZE =====================
 const canvas = document.getElementById('c');
@@ -69,6 +70,7 @@ const characterPose3D = { visible:false, sx:0, sy:0, scaleX:1, scaleY:1 };
 
 let W = 0, H = 0, DPR = 1, SCALE = 1, WORLD_SCALE = 1;
 let TILE_W = BASE_TILE_W, TILE_H = BASE_TILE_H, TILE_Z = BASE_TILE_Z;
+let jumpCameraY = 0;
 
 function resize() {
   W = window.innerWidth;
@@ -106,7 +108,7 @@ function camIsoY() { return isoY(camCol, camRow); }
 function projectToScreen(col, row) {
   return {
     x: W / 2 + isoX(col, row) - camIsoX(),
-    y: H * 0.42 + isoY(col, row) - camIsoY() - TILE_Z,
+    y: H * 0.42 + isoY(col, row) - camIsoY() - TILE_Z + jumpCameraY,
   };
 }
 
@@ -240,6 +242,7 @@ function reset() {
   ch.dying = false; ch.dieFall = 0; ch.dieZ = 0; ch.dieVX = 0; ch.dieVY = 0;
   ch.willLand = null;
   camCol = ch.col; camRow = ch.row;
+  jumpCameraY = 0;
   lastDir = null;
   score = 0;
   cityIndex = 0; cityFade = 1;
@@ -380,6 +383,16 @@ function dieJump() {
 function update() {
   camCol += (ch.col - camCol) * 0.1;
   camRow += (ch.row - camRow) * 0.1;
+
+  // 人物起跳过高时让整个游戏世界向下平移，确保模型完整留在屏幕内
+  const baseCharacterY = H * 0.42 + isoY(ch.col, ch.row) - camIsoY() - TILE_Z;
+  const characterTopWithoutCamera = baseCharacterY - ch.jumpZ - CHARACTER_MODEL_HEIGHT * WORLD_SCALE;
+  const safeTop = Math.max(20, 24 * SCALE);
+  const desiredJumpCameraY = ch.jumping ? Math.max(0, safeTop - characterTopWithoutCamera) : 0;
+  const cameraEase = desiredJumpCameraY > jumpCameraY ? 0.28 : 0.16;
+  jumpCameraY += (desiredJumpCameraY - jumpCameraY) * cameraEase;
+  if (!ch.jumping && Math.abs(jumpCameraY) < 0.1) jumpCameraY = 0;
+
   if (cityFade < 1) cityFade = Math.min(1, cityFade + 1 / 30);
   if (nextCityPopup.life > 0) nextCityPopup.life -= 0.015;
   if (state === 'charge' && charging) {
