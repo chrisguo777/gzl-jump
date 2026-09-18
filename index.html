@@ -389,8 +389,13 @@ function update() {
   const characterTopWithoutCamera = baseCharacterY - ch.jumpZ - CHARACTER_MODEL_HEIGHT * WORLD_SCALE;
   const safeTop = Math.max(20, 24 * SCALE);
   const desiredJumpCameraY = ch.jumping ? Math.max(0, safeTop - characterTopWithoutCamera) : 0;
-  const cameraEase = desiredJumpCameraY > jumpCameraY ? 0.28 : 0.16;
-  jumpCameraY += (desiredJumpCameraY - jumpCameraY) * cameraEase;
+  if (desiredJumpCameraY > jumpCameraY) {
+    // 上升时即时锁住安全线，避免任何一帧越出屏幕
+    jumpCameraY = desiredJumpCameraY;
+  } else {
+    // 下落与落地后平滑回正，避免画面突然弹回
+    jumpCameraY += (desiredJumpCameraY - jumpCameraY) * 0.16;
+  }
   if (!ch.jumping && Math.abs(jumpCameraY) < 0.1) jumpCameraY = 0;
 
   if (cityFade < 1) cityFade = Math.min(1, cityFade + 1 / 30);
