@@ -53,6 +53,7 @@ const DIR = {
 };
 
 const BASE_TILE_W = 96, BASE_TILE_H = 48, BASE_TILE_Z = 40;
+const WORLD_ZOOM = 1.45;
 
 // ===================== CANVAS / SIZE =====================
 const canvas = document.getElementById('c');
@@ -66,7 +67,7 @@ let characterRoot3D = null, flipPivot3D = null, modelGroup3D = null;
 let characterRig3D = null, character3DReady = false;
 const characterPose3D = { visible:false, sx:0, sy:0, scaleX:1, scaleY:1 };
 
-let W = 0, H = 0, DPR = 1, SCALE = 1;
+let W = 0, H = 0, DPR = 1, SCALE = 1, WORLD_SCALE = 1;
 let TILE_W = BASE_TILE_W, TILE_H = BASE_TILE_H, TILE_Z = BASE_TILE_Z;
 
 function resize() {
@@ -79,10 +80,11 @@ function resize() {
   canvas.style.height = H + 'px';
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   SCALE = Math.min(W, H) / 600;
-  TILE_W = BASE_TILE_W * SCALE;
-  TILE_H = BASE_TILE_H * SCALE;
-  TILE_Z = BASE_TILE_Z * SCALE;
-  charImg.style.width = (22.5 * SCALE) + 'px';
+  WORLD_SCALE = SCALE * WORLD_ZOOM;
+  TILE_W = BASE_TILE_W * WORLD_SCALE;
+  TILE_H = BASE_TILE_H * WORLD_SCALE;
+  TILE_Z = BASE_TILE_Z * WORLD_SCALE;
+  charImg.style.width = (22.5 * WORLD_SCALE) + 'px';
   if (renderer3D && camera3D) {
     renderer3D.setPixelRatio(DPR);
     renderer3D.setSize(W, H, false);
@@ -224,14 +226,14 @@ function nextDistOf() {
   return plats[idx + 1]?.dist ?? 3;
 }
 function ensureAhead() {
-  while (plats.length < indexOfChar() + 7) addPlat();
+  while (plats.length < indexOfChar() + 6) addPlat();
 }
 
 // ===================== RESET =====================
 function reset() {
   occupiedCells = new Set(['0,0']);
   plats = [{ col: 0, row: 0, dir: null, dist: 0 }];
-  for (let i = 0; i < 7; i++) addPlat();
+  for (let i = 0; i < 5; i++) addPlat();
   ch.col = 0; ch.row = 0;
   ch.jumpZ = 0; ch.jumping = false; ch.jumpT = 0;
   ch.sqX = 1; ch.sqY = 1; ch.landImpact = 0;
@@ -1607,9 +1609,9 @@ function renderCharacter3D() {
       0
     );
     characterRoot3D.scale.set(
-      SCALE * characterPose3D.scaleX,
-      SCALE * characterPose3D.scaleY,
-      SCALE
+      WORLD_SCALE * characterPose3D.scaleX,
+      WORLD_SCALE * characterPose3D.scaleY,
+      WORLD_SCALE
     );
 
     flipPivot3D.quaternion.identity();
@@ -1649,7 +1651,7 @@ function renderCharacter3D() {
 
 function drawCharacter2DFallback(sx, sy, scaleX, scaleY) {
   if (!charImg.complete) return;
-  const imgW = charImg.naturalWidth ? 22.5 * SCALE : (charImg.width || 45 * SCALE);
+  const imgW = charImg.naturalWidth ? 22.5 * WORLD_SCALE : (charImg.width || 45 * WORLD_SCALE);
   const ratio = charImg.naturalWidth ? charImg.naturalHeight / charImg.naturalWidth : 2;
   const imgH = imgW * ratio;
   let flipAngle = 0;
